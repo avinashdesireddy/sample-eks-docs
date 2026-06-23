@@ -1,0 +1,117 @@
+alertmanager:
+  enabled: false
+
+prometheus-adapter:
+  enabled: false
+
+prometheus:
+  serviceAccount:
+    create: true
+    name: ${prometheus_service_account}
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    enableRemoteWriteReceiver: true
+    retention: 5h
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    remoteWrite:
+      - url: ${remote_write_url}
+        sigv4:
+          region: ${region}
+        queueConfig:
+          maxSamplesPerSend: 1000
+          maxShards: 200
+          capacity: 2500
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+    nodeSelector:
+      karpenter.sh/nodepool: system
+
+prometheusOperator:
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  nodeSelector:
+    karpenter.sh/nodepool: system
+  admissionWebhooks:
+    patch:
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+      nodeSelector:
+        karpenter.sh/nodepool: system
+
+kube-state-metrics:
+  nodeSelector:
+    karpenter.sh/nodepool: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+
+grafana:
+  enabled: true
+  serviceAccount:
+    create: true
+    name: ${grafana_service_account}
+  grafana.ini:
+    auth:
+      sigv4_auth_enabled: true
+  sidecar:
+    datasources:
+      defaultDatasourceEnabled: false
+  plugins:
+    - grafana-amazonprometheus-datasource
+  additionalDataSources:
+    - name: Amazon-Managed-Prometheus
+      type: grafana-amazonprometheus-datasource
+      access: proxy
+      url: ${amp_endpoint}
+      isDefault: true
+      jsonData:
+        sigV4Auth: true
+        defaultRegion: ${region}
+        sigV4Region: ${region}
+      editable: true
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: GPU Monitoring
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+  dashboards:
+    default:
+      nvidia-dcgm:
+        gnetId: 25261
+        revision: 1
+        datasource:
+          - name: DS_PROMETHEUS
+            value: Amazon-Managed-Prometheus
+      vllm:
+        gnetId: 25263
+        revision: 1
+        datasource:
+          - name: DS_PROMETHEUS
+            value: Amazon-Managed-Prometheus
+      dashboard-25494:
+        gnetId: 25494
+        revision: 1
+        datasource:
+          - name: DS_PROMETHEUS
+            value: Amazon-Managed-Prometheus
+  nodeSelector:
+    karpenter.sh/nodepool: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+
+prometheus-node-exporter:
+  tolerations:
+    - operator: Exists

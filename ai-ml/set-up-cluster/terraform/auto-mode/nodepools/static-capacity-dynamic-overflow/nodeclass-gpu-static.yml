@@ -1,0 +1,18 @@
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: gpu-static
+  labels:
+    guide: ai-eks-docs
+spec:
+  role: ${node_iam_role_name}
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${cluster_name}
+        kubernetes.io/role/internal-elb: "1"
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${cluster_name}
+  capacityReservationSelectorTerms:
+    - tags:
+        nodepool: static-capacity-dynamic-overflow

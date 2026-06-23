@@ -1,0 +1,70 @@
+# vLLM inference server (Deployment) + in-cluster ClusterIP Service on port 8000.
+# Streams the model directly from S3 into GPU memory via Run:ai Model Streamer.
+# MODEL_BUCKET must be set at apply time, e.g.:
+#   export MODEL_BUCKET=$(terraform -chdir=../../set-up-cluster/terraform/auto-mode output -raw model_bucket)
+#   envsubst < vllm-deployment.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-inference-app
+  labels:
+    guide: ai-eks-docs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-inference-app
+  template:
+    metadata:
+      labels:
+        app: vllm-inference-app
+        guide: ai-eks-docs
+    spec:
+      serviceAccountName: model-storage-sa
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      nodeSelector:
+        karpenter.sh/nodepool: gpu-inf
+      containers:
+        - name: vllm-inference
+          image: public.ecr.aws/deep-learning-containers/vllm:0.21.0-gpu-py312-cu130-ubuntu22.04-ec2-v1.0-soci
+          ports:
+            - containerPort: 8000
+          args:
+            - "--model=s3://${MODEL_BUCKET}/Ministral-3-8B-Instruct-2512/"
+            - "--host=0.0.0.0"
+            - "--port=8000"
+            - "--tensor-parallel-size=1"
+            - "--gpu-memory-utilization=0.9"
+            - "--max-model-len=8192"
+            - "--max-num-seqs=128"
+            - "--load-format=runai_streamer"
+            - "--enforce-eager"
+            - "--tokenizer_mode=mistral"
+            - "--config_format=mistral"
+            - "--enable-auto-tool-choice"
+            - "--tool-call-parser=mistral"
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+            requests:
+              memory: "40Gi"
+              cpu: "8"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-inference-svc
+  namespace: default
+  labels:
+    app: vllm-inference-app
+spec:
+  selector:
+    app: vllm-inference-app
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
