@@ -36,7 +36,7 @@ resource "aws_ec2_capacity_reservation" "gpu" {
 }
 
 # Dynamic Auto Mode pools reference the managed `default` NodeClass (no nodeclass file), so this is
-# empty unless a strategy ships its own custom NodeClass (e.g. reserved-capacity-spot-overflow).
+# empty unless a strategy ships its own custom NodeClass (e.g. reserved-spot-ondemand).
 resource "kubectl_manifest" "nodeclasses" {
   for_each = local.nodeclass_files
 

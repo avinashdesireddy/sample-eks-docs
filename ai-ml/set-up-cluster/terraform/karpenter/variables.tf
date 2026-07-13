@@ -14,13 +14,13 @@ variable "cluster_name" {
 variable "kubernetes_version" {
   description = "Kubernetes minor version for the EKS control plane."
   type        = string
-  default     = "1.35"
+  default     = "1.36"
 }
 
 variable "karpenter_version" {
   description = "Karpenter chart version (CRD + controller releases)."
   type        = string
-  default     = "1.12.0"
+  default     = "1.13.0"
 }
 
 variable "enable_karpenter_node_repair" {
@@ -68,11 +68,11 @@ variable "dcgm_exporter_version" {
 variable "nodepools" {
   description = <<-EOT
     GPU NodePool strategies to enable, keyed by folder name under nodepools/. Defaults to
-    { "dynamic-spot-on-demand" = {} }. Set `reservation` on a strategy to have Terraform create a
+    { "spot-ondemand" = {} }. Set `reservation` on a strategy to have Terraform create a
     tagged On-Demand Capacity Reservation (ODCR) for it; the NodeClass selects it by the
     nodepool=<key> tag. An ODCR bills immediately until destroyed.
 
-    dynamic-spot-on-demand and reserved-capacity-spot-overflow both manage the gpu-inf pool and are
+    spot-ondemand and reserved-spot-ondemand both manage the gpu-inf pool and are
     mutually exclusive. To add a strategy: create nodepools/<name>/ and add <name> to the validation list.
   EOT
   type = map(object({
@@ -82,14 +82,14 @@ variable "nodepools" {
       az             = optional(string, "") # defaults to the first cluster AZ
     }))
   }))
-  default = { "dynamic-spot-on-demand" = {} }
+  default = { "spot-ondemand" = {} }
 
   validation {
     condition = alltrue([
       for k in keys(var.nodepools) : contains([
-        "dynamic-spot-on-demand",
-        "reserved-capacity-spot-overflow",
-        "static-capacity-dynamic-overflow",
+        "spot-ondemand",
+        "reserved-spot-ondemand",
+        "static-spot-ondemand",
       ], k)
     ])
     error_message = "Each key must be an existing strategy folder under nodepools/."
@@ -97,18 +97,18 @@ variable "nodepools" {
 
   validation {
     condition = length(setintersection(keys(var.nodepools), [
-      "dynamic-spot-on-demand",
-      "reserved-capacity-spot-overflow",
-      "static-capacity-dynamic-overflow",
+      "spot-ondemand",
+      "reserved-spot-ondemand",
+      "static-spot-ondemand",
     ])) <= 1
-    error_message = "Enable at most one GPU inference strategy (dynamic-spot-on-demand, reserved-capacity-spot-overflow, static-capacity-dynamic-overflow); each is a complete solution for the gpu-inf workload."
+    error_message = "Enable at most one GPU inference strategy (spot-ondemand, reserved-spot-ondemand, static-spot-ondemand); each is a complete solution for the gpu-inf workload."
   }
 
   validation {
     condition = alltrue([
       for k, v in var.nodepools :
-      contains(["reserved-capacity-spot-overflow", "static-capacity-dynamic-overflow"], k) ? v.reservation != null : true
+      contains(["reserved-spot-ondemand", "static-spot-ondemand"], k) ? v.reservation != null : true
     ])
-    error_message = "reserved-capacity-spot-overflow and static-capacity-dynamic-overflow require a `reservation` (their reserved nodes run on an ODCR)."
+    error_message = "reserved-spot-ondemand and static-spot-ondemand require a `reservation` (their reserved nodes run on an ODCR)."
   }
 }

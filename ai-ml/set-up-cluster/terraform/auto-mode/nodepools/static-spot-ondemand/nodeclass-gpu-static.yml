@@ -1,7 +1,7 @@
 apiVersion: eks.amazonaws.com/v1
 kind: NodeClass
 metadata:
-  name: gpu-inf
+  name: gpu-static
   labels:
     guide: ai-eks-docs
 spec:
@@ -9,10 +9,10 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${cluster_name}
-        kubernetes.io/role/internal-elb: "1"
+        kubernetes.io/role/internal-elb: '1'
   securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${cluster_name}
   capacityReservationSelectorTerms:
     - tags:
-        nodepool: reserved-capacity-spot-overflow
+        nodepool: static-spot-ondemand

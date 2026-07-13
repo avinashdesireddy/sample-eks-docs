@@ -1,7 +1,7 @@
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
-  name: gpu-inf
+  name: gpu-static
   labels:
     guide: ai-eks-docs
 spec:
@@ -16,7 +16,7 @@ spec:
         karpenter.sh/discovery: ${cluster_name}
   capacityReservationSelectorTerms:
     - tags:
-        nodepool: reserved-capacity-spot-overflow
+        nodepool: static-spot-ondemand
   instanceStorePolicy: RAID0
   userData: |
     apiVersion: node.eks.aws/v1alpha1
