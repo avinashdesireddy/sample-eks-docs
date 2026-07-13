@@ -1,6 +1,3 @@
-# Always-on reserved pool. replicas keeps ODCR-backed nodes running; the scheduler places GPU pods
-# here first. capacity-type=reserved + the gpu-static EC2NodeClass (tag-selected ODCR) constrain
-# Karpenter to the reservation, so the instance type is resolved from the ODCR (no need to pin it).
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
@@ -24,3 +21,6 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["reserved"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["p6-b200.48xlarge"]

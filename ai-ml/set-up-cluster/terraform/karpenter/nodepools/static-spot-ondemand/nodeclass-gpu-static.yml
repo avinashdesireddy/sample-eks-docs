@@ -17,6 +17,34 @@ spec:
   capacityReservationSelectorTerms:
     - id: ${capacity_reservation_id}
   instanceStorePolicy: RAID0
+  networkInterfaces:
+    - networkCardIndex: 0
+      deviceIndex: 0
+      interfaceType: interface
+    - networkCardIndex: 0
+      deviceIndex: 1
+      interfaceType: efa-only
+    - networkCardIndex: 1
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 2
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 3
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 4
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 5
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 6
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 7
+      deviceIndex: 0
+      interfaceType: efa-only
   userData: |
     apiVersion: node.eks.aws/v1alpha1
     kind: NodeConfig
