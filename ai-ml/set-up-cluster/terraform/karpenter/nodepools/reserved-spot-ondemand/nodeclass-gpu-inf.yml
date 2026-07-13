@@ -15,8 +15,7 @@ spec:
     - tags:
         karpenter.sh/discovery: ${cluster_name}
   capacityReservationSelectorTerms:
-    - tags:
-        nodepool: reserved-spot-ondemand
+    - id: ${capacity_reservation_id}
   instanceStorePolicy: RAID0
   userData: |
     apiVersion: node.eks.aws/v1alpha1
