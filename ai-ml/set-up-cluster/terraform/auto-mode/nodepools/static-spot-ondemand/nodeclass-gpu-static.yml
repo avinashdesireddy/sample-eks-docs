@@ -9,10 +9,9 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${cluster_name}
-        kubernetes.io/role/internal-elb: '1'
+        kubernetes.io/role/internal-elb: "1"
   securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: ${cluster_name}
   capacityReservationSelectorTerms:
-    - tags:
-        nodepool: static-spot-ondemand
+    - id: ${capacity_reservation_id}
