@@ -57,6 +57,61 @@ minutes). Check Karpenter logs for progress:
 kubectl logs -n kube-system -l app.kubernetes.io/name=karpenter --tail=50 | grep gpu-static
 ```
 
+### Install the EFA device plugin
+
+The `networkInterfaces` block in `nodeclass-gpu-static.yaml` gets EFA network interfaces attached
+to the EC2 instance, but Kubernetes doesn't know they exist until the EFA device plugin runs on the
+node and advertises them as the `vpc.amazonaws.com/efa` extended resource. Without it, pods can't
+request EFA devices and nodes will show no allocatable EFA resources.
+
+> [!NOTE]
+> Karpenter and EKS Auto Mode only support the EFA device plugin, not the newer EFA DRA driver
+> (DRANET). See [Manage EFA devices on Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/device-management-efa.html).
+
+The static NodePool taints its nodes with `nvidia.com/gpu:NoSchedule`, so the plugin needs a
+matching toleration or its DaemonSet pods won't schedule onto the GPU nodes:
+
+> Quote each `--set` value below - unquoted `[0]` is treated as a glob pattern in zsh (macOS
+> default shell) and fails with `no matches found`.
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+helm install efa eks/aws-efa-k8s-device-plugin -n kube-system \
+  --set 'tolerations[0].key=nvidia.com/gpu' \
+  --set 'tolerations[0].operator=Exists' \
+  --set 'tolerations[0].effect=NoSchedule'
+```
+
+If you already installed it without the toleration, upgrade in place:
+
+```bash
+helm upgrade efa eks/aws-efa-k8s-device-plugin -n kube-system \
+  --set 'tolerations[0].key=nvidia.com/gpu' \
+  --set 'tolerations[0].operator=Exists' \
+  --set 'tolerations[0].effect=NoSchedule'
+```
+
+#### Verify installation
+
+```bash
+kubectl get daemonset -n kube-system efa-aws-efa-k8s-device-plugin
+```
+
+Check that nodes have allocatable EFA resources (8 per `p6-b200.48xlarge` node, matching the 8
+`efa-only` interfaces in the NodeClass):
+
+```bash
+kubectl get nodes -o custom-columns="NAME:.metadata.name,EFA:.status.allocatable.vpc\.amazonaws\.com/efa"
+```
+
+Expected output:
+
+```
+NAME                                          EFA
+ip-10-0-xx-xx.us-east-2.compute.internal      8
+```
+
 ### Install MPI Operator
 
 MPI Operator is an open-source Kubernetes controller from Kubeflow that manages distributed MPI
