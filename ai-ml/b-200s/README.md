@@ -152,7 +152,7 @@ kubectl apply -f mpijob-nccl.yaml
 Follow the launcher logs:
 
 ```bash
-kubectl logs -f -l training.kubeflow.org/job-role=launcher,mpi/name=test
+kubectl logs -f -l training.kubeflow.org/job-role=launcher
 ```
 
 ### Cleanup
