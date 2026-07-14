@@ -84,6 +84,16 @@ resource "aws_vpc_security_group_ingress_rule" "shared_self" {
   ip_protocol                  = "-1"
 }
 
+# EFA requires the security group to explicitly allow all traffic to/from itself (self-referencing
+# both directions), not just a same-VPC or 0.0.0.0/0 egress rule.
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html#efa-start-security
+resource "aws_vpc_security_group_egress_rule" "shared_self" {
+  description                  = "Self-egress, all protocols (required for EFA)"
+  security_group_id            = aws_security_group.shared.id
+  referenced_security_group_id = aws_security_group.shared.id
+  ip_protocol                  = "-1"
+}
+
 resource "aws_vpc_security_group_egress_rule" "shared_all" {
   description       = "Allow all egress"
   security_group_id = aws_security_group.shared.id
