@@ -70,7 +70,8 @@ resource "helm_release" "karpenter" {
         clusterEndpoint   = module.eks.cluster_endpoint
         interruptionQueue = module.karpenter.queue_name
         featureGates = {
-          nodeRepair = var.enable_karpenter_node_repair
+          nodeRepair     = var.enable_karpenter_node_repair
+          staticCapacity = true
         }
       }
       webhook = {

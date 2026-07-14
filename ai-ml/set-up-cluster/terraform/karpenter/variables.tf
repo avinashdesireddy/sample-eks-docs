@@ -20,7 +20,7 @@ variable "kubernetes_version" {
 variable "karpenter_version" {
   description = "Karpenter chart version (CRD + controller releases)."
   type        = string
-  default     = "1.13.0"
+  default     = "1.14.0"
 }
 
 variable "enable_karpenter_node_repair" {
