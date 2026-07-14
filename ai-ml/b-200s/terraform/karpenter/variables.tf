@@ -41,6 +41,12 @@ variable "efa_device_plugin_version" {
   default     = "v0.5.29"
 }
 
+variable "alb_controller_version" {
+  description = "AWS Load Balancer Controller chart version (aws-load-balancer-controller, from eks-charts)."
+  type        = string
+  default     = "3.4.2"
+}
+
 variable "allowed_cidrs" {
   description = "CIDRs allowed to reach any publicly accessible endpoint this stack creates (EKS API, ALB)."
   type        = list(string)
