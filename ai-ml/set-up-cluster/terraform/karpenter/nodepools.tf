@@ -1,4 +1,24 @@
 # GPU NodePools, selected by var.nodepools. See ../README.md for usage (strategies, reserved capacity).
+#
+# Also provisions a general-purpose, untainted NodePool/NodeClass for non-GPU workloads so they
+# don't need to tolerate the GPU NodePools' taint or the system MNG's CriticalAddonsOnly taint.
+# Named to match EKS Auto Mode's built-in "general-purpose" node pool, which this Karpenter
+# variant otherwise lacks.
+
+resource "kubectl_manifest" "general_purpose_nodeclass" {
+  yaml_body = templatefile("${path.module}/nodepools/general-purpose/nodeclass-general-purpose.yml", {
+    cluster_name       = local.name
+    node_iam_role_name = module.karpenter.node_iam_role_name
+  })
+
+  depends_on = [module.eks]
+}
+
+resource "kubectl_manifest" "general_purpose_nodepool" {
+  yaml_body = file("${path.module}/nodepools/general-purpose/nodepool-general-purpose.yml")
+
+  depends_on = [kubectl_manifest.general_purpose_nodeclass, module.eks]
+}
 
 locals {
   nodepools_dir = "${path.module}/nodepools"
