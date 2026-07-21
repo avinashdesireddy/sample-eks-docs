@@ -1,0 +1,31 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu-static
+spec:
+  # Static capacity pool: maintains exactly ${RESERVED_INSTANCE_COUNT} nodes regardless of pod
+  # demand. Once replicas is set, this pool cannot switch to dynamic mode.
+  replicas: ${RESERVED_INSTANCE_COUNT}
+  # Only limits.nodes is honored on static pools. Set above replicas to allow temporary scaling
+  # during node replacement (drift/AMI updates).
+  limits:
+    nodes: ${NODE_LIMIT}
+  template:
+    metadata:
+      labels:
+        guide: ai-eks-docs
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: gpu-static
+      taints:
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["reserved"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["p6-b200.48xlarge"]

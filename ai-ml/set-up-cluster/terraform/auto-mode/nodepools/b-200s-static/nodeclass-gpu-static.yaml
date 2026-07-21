@@ -1,0 +1,50 @@
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: gpu-static
+  labels:
+    guide: ai-eks-docs
+spec:
+  role: ${NODE_IAM_ROLE}
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  capacityReservationSelectorTerms:
+    - id: ${CAPACITY_RESERVATION_ID}
+  advancedNetworking:
+    # Static EFA config for p6-b200.48xlarge: 1 standard ENI + 8 efa-only interfaces across the
+    # 8 network cards (matches the AWS-recommended P6-B200 layout). When networkInterfaces is set,
+    # Auto Mode attaches no additional IPs/ENIs after launch, so the primary ENI must declare pod
+    # IP capacity up front - secondaryIPv4PrefixCount: 1 provides a /28 (16 pod IPs).
+    networkInterfaces:
+      - networkCardIndex: 0
+        deviceIndex: 0
+        interfaceType: interface
+        secondaryIPv4PrefixCount: 1
+      - networkCardIndex: 0
+        deviceIndex: 1
+        interfaceType: efa-only
+      - networkCardIndex: 1
+        deviceIndex: 0
+        interfaceType: efa-only
+      - networkCardIndex: 2
+        deviceIndex: 0
+        interfaceType: efa-only
+      - networkCardIndex: 3
+        deviceIndex: 0
+        interfaceType: efa-only
+      - networkCardIndex: 4
+        deviceIndex: 0
+        interfaceType: efa-only
+      - networkCardIndex: 5
+        deviceIndex: 0
+        interfaceType: efa-only
+      - networkCardIndex: 6
+        deviceIndex: 0
+        interfaceType: efa-only
+      - networkCardIndex: 7
+        deviceIndex: 0
+        interfaceType: efa-only
