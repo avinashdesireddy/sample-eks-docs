@@ -1,18 +1,7 @@
 # XID fault injection for GPU nodes - works on EKS Auto Mode AND self-managed Karpenter / managed
 # node groups.
 #
-# The EKS node monitoring agent detects XID errors via the DCGM *policy violation* channel, NOT by
-# parsing /dev/kmsg. (Source: aws/eks-node-monitoring-agent - monitors/nvidia/dcgm/dcgm_client.go
-# registers dcgmapi.XidPolicy; the only thing read from /dev/kmsg is NCCL libnccl.so segfaults.)
-# So writing XIDs to /dev/kmsg does NOT trigger node repair - only a DCGM field-230 injection does.
-#
-# The agent's DCGM client connects in Standalone mode to nv-hostengine at localhost:5555. On both
-# cluster types that engine is reachable at localhost:5555 from a hostNetwork pod:
-#   - EKS Auto Mode: the agent runs inside the node AMI (no kubectl-visible pod).
-#   - Karpenter / managed node groups: the eks-node-monitoring-agent add-on runs a `dcgm-server`
-#     DaemonSet that publishes nv-hostengine on hostPort 5555.
-# Either way the host filesystem has no `dcgmi` binary, so we bring our own via this pod and inject
-# into field 230 (DCGM_FI_DEV_XID_ERRORS).
+# The EKS node monitoring agent detects XID errors via the DCGM *policy violation* channel.
 #
 # One critical XID on one GPU is a complete repair test: AcceleratedHardwareReady is a node-level
 # condition, so the first critical XID already dooms the whole node - injecting more XIDs or more
@@ -31,7 +20,7 @@ metadata:
   name: xid-inject
 spec:
   # nodeName: i-075b27706ebbba266   # REQUIRED: pin to the GPU node whose nv-hostengine you target
-  hostNetwork: true             # so localhost:5555 reaches the node's nv-hostengine
+  hostNetwork: true                 # so localhost:5555 reaches the node's nv-hostengine
   hostPID: true
   tolerations:
     - key: nvidia.com/gpu
@@ -40,16 +29,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: inject
-      # DCGM image that ships the dcgmi CLI (the node's host filesystem does not expose dcgmi).
-      # MUST match the node monitoring agent's DCGM major version or dcgmi fails with
-      # "API version mismatch". The agent ships DCGM 4.x (datacenter-gpu-manager-4-core,
-      # dcgm-exporter tag 4.5.2-4.8.1); this image is the same DCGM 4.x line.
-      #
-      # NVIDIA's public NGC registry (anonymous pull, no ECR login). This is the upstream the EKS
-      # observability image mirrors - same tag, same DCGM 4.5.2.
       image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-ubuntu22.04
-      # AWS EKS mirror (private ECR - needs `aws ecr get-login-password`):
-      # image: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/observability/dcgm-exporter:4.5.2-4.8.1-ubuntu22.04
       securityContext:
         privileged: true
       env:
