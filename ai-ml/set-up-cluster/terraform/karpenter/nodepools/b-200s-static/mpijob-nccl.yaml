@@ -6,7 +6,7 @@ spec:
   runPolicy:
     cleanPodPolicy: Running
     backoffLimit: 20
-  slotsPerWorker: 8
+  slotsPerWorker: ${GPUS_PER_INSTANCE}
   mpiReplicaSpecs:
     Launcher:
       replicas: 1
@@ -25,9 +25,9 @@ spec:
                 - --allow-run-as-root
                 - --tag-output
                 - -np
-                - "32"
+                - "${TOTAL_GPU_COUNT}"
                 - -N
-                - "8"
+                - "${GPUS_PER_INSTANCE}"
                 - --bind-to
                 - none
                 - -x
@@ -61,7 +61,7 @@ spec:
                 - -w
                 - "10"
     Worker:
-      replicas: 4
+      replicas: ${RESERVED_INSTANCE_COUNT}
       template:
         metadata:
           labels:
@@ -95,11 +95,11 @@ spec:
                   mountPath: /dev/shm
               resources:
                 limits:
-                  nvidia.com/gpu: 8
-                  vpc.amazonaws.com/efa: 8
+                  nvidia.com/gpu: ${GPUS_PER_INSTANCE}
+                  vpc.amazonaws.com/efa: ${GPUS_PER_INSTANCE}
                 requests:
-                  nvidia.com/gpu: 8
-                  vpc.amazonaws.com/efa: 8
+                  nvidia.com/gpu: ${GPUS_PER_INSTANCE}
+                  vpc.amazonaws.com/efa: ${GPUS_PER_INSTANCE}
           volumes:
             - name: shmem
               hostPath:

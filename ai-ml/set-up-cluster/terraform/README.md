@@ -76,6 +76,14 @@ Notes:
   or fails with `InsufficientInstanceCapacity` - there is no automatic AZ fallback. If creation
   fails, set `reservation.az` to another AZ and re-apply.
 
+### Manually-applied static pool (existing reservation)
+
+`karpenter/nodepools/b-200s-static/` is a static, reservation-backed `p6-b200.48xlarge` NodePool
+with EFA networking, plus an NCCL test. Unlike the strategies above, it's **not** wired into
+`var.nodepools` - Terraform can't create a Capacity Block for a specific instance type/date, so
+this is applied manually with `kubectl` against a reservation or Capacity Block you already have.
+See [`karpenter/nodepools/b-200s-static/README.md`](karpenter/nodepools/b-200s-static/README.md).
+
 ## EFA
 
 The EFA device plugin is needed if you're on an EFA-capable instance size (`g*.8xlarge`/`.16xlarge`

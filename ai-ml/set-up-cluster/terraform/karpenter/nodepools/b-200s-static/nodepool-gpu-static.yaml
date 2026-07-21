@@ -3,7 +3,7 @@ kind: NodePool
 metadata:
   name: gpu-static
 spec:
-  replicas: 4
+  replicas: ${RESERVED_INSTANCE_COUNT}
   template:
     metadata:
       labels:
