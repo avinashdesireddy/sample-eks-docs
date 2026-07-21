@@ -33,15 +33,22 @@ The outputs also include the node IAM role name and the model S3 bucket.
 
 ## GPU NodePools
 
-`var.nodepools` selects the GPU inference strategy. It defaults to `dynamic-spot-on-demand`, so a
-plain `terraform apply` needs no extra flags. The three strategies are mutually exclusive (each is a
-complete solution for the inference workload); enable at most one.
+`var.nodepools` selects the GPU inference strategy. It defaults to `{}` (no GPU NodePools), so a
+plain `terraform apply` provisions the cluster and monitoring stack only, with no GPU capacity and
+no GPU billing. Opt in to a strategy with `-var`; the two strategies are mutually exclusive (each
+is a complete solution for the inference workload), so enable at most one.
 
-| Strategy                           | What you get                                                                                              |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `dynamic-spot-on-demand` (default) | On-demand GPU pool, spot-first with on-demand overflow. No reservation.                                   |
-| `reserved-capacity-spot-overflow`  | Reserved GPU pool backed by an ODCR, with spot/on-demand overflow.                                        |
-| `static-capacity-dynamic-overflow` | Always-on reserved pool (replicas = reserved instance count) plus a dynamic spot/on-demand overflow pool. |
+| Strategy                 | What you get                                                            |
+| ------------------------ | ----------------------------------------------------------------------- |
+| _(none, default)_        | No GPU NodePool. Cluster and monitoring stack only.                     |
+| `spot-ondemand`          | On-demand GPU pool, spot-first with on-demand overflow. No reservation. |
+| `reserved-spot-ondemand` | Reserved GPU pool backed by an ODCR, with spot/on-demand overflow.      |
+
+Enable the on-demand/spot pool with no reservation:
+
+```bash
+terraform apply -var 'nodepools={"spot-ondemand"={}}'
+```
 
 ### Reserved capacity
 
@@ -52,19 +59,13 @@ tagged `nodepool=<strategy>` and the NodeClass selects it by that tag.
 Use defaults (`g6e.4xlarge`, 1 instance, first cluster AZ):
 
 ```bash
-terraform apply -var 'nodepools={"reserved-capacity-spot-overflow"={reservation={}}}'
+terraform apply -var 'nodepools={"reserved-spot-ondemand"={reservation={}}}'
 ```
 
 Pick the instance type, count, and AZ:
 
 ```bash
-terraform apply -var 'nodepools={"reserved-capacity-spot-overflow"={reservation={instance_type="g6e.4xlarge",instance_count=3,az="us-east-2a"}}}'
-```
-
-Always-on static pool (3 reserved instances) with dynamic overflow:
-
-```bash
-terraform apply -var 'nodepools={"static-capacity-dynamic-overflow"={reservation={instance_type="g6e.xlarge",instance_count=3}}}'
+terraform apply -var 'nodepools={"reserved-spot-ondemand"={reservation={instance_type="g6e.4xlarge",instance_count=3,az="us-east-2a"}}}'
 ```
 
 Notes:
@@ -77,8 +78,9 @@ Notes:
 
 ## Clean up
 
-To stop GPU charges while keeping the cluster running, drop the reservation by applying back to the
-default. This destroys the ODCR and its reserved nodes; the cluster and monitoring stack stay up:
+To remove GPU NodePools while keeping the cluster running, drop the strategy by applying back to
+the default (no `-var 'nodepools=...'`). If a strategy had a reservation, this also destroys its
+ODCR; the cluster and monitoring stack stay up:
 
 ```bash
 terraform apply

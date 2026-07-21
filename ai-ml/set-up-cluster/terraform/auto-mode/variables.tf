@@ -50,7 +50,7 @@ variable "dcgm_exporter_version" {
 variable "nodepools" {
   description = <<-EOT
     GPU NodePool strategies to enable, keyed by folder name under nodepools/. Defaults to
-    { "spot-ondemand" = {} }. Set `reservation` on a strategy to have Terraform create a
+    {} (no GPU NodePools). Set `reservation` on a strategy to have Terraform create a
     tagged On-Demand Capacity Reservation (ODCR) for it; the NodeClass selects it by the
     nodepool=<key> tag. An ODCR bills immediately until destroyed.
 
@@ -64,14 +64,13 @@ variable "nodepools" {
       az             = optional(string, "") # defaults to the first cluster AZ
     }))
   }))
-  default = { "spot-ondemand" = {} }
+  default = {}
 
   validation {
     condition = alltrue([
       for k in keys(var.nodepools) : contains([
         "spot-ondemand",
         "reserved-spot-ondemand",
-        "static-spot-ondemand",
       ], k)
     ])
     error_message = "Each key must be an existing strategy folder under nodepools/."
@@ -81,16 +80,15 @@ variable "nodepools" {
     condition = length(setintersection(keys(var.nodepools), [
       "spot-ondemand",
       "reserved-spot-ondemand",
-      "static-spot-ondemand",
     ])) <= 1
-    error_message = "Enable at most one GPU inference strategy (spot-ondemand, reserved-spot-ondemand, static-spot-ondemand); each is a complete solution for the gpu-inf workload."
+    error_message = "Enable at most one GPU inference strategy (spot-ondemand, reserved-spot-ondemand); each is a complete solution for the gpu-inf workload."
   }
 
   validation {
     condition = alltrue([
       for k, v in var.nodepools :
-      contains(["reserved-spot-ondemand", "static-spot-ondemand"], k) ? v.reservation != null : true
+      contains(["reserved-spot-ondemand"], k) ? v.reservation != null : true
     ])
-    error_message = "reserved-spot-ondemand and static-spot-ondemand require a `reservation` (their reserved nodes run on an ODCR)."
+    error_message = "reserved-spot-ondemand requires a `reservation` (its reserved nodes run on an ODCR)."
   }
 }
