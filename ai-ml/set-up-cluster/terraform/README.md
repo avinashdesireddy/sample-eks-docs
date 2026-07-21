@@ -45,8 +45,9 @@ complete solution for the inference workload); enable at most one.
 
 ### Reserved capacity
 
-The reserved strategies need a `reservation`. By default Terraform creates the On-Demand Capacity
-Reservation (ODCR) for you - you do not supply a reservation ID.
+The reserved strategies need a `reservation`. Terraform creates the
+On-Demand Capacity Reservation (ODCR) for you - you do not supply a reservation ID. The ODCR is
+tagged `nodepool=<strategy>` and the NodeClass selects it by that tag.
 
 Use defaults (`g6e.4xlarge`, 1 instance, first cluster AZ):
 
@@ -73,21 +74,6 @@ Notes:
 - The reservation is a single block in **one AZ**. EC2 reserves all of `instance_count` in that AZ
   or fails with `InsufficientInstanceCapacity` - there is no automatic AZ fallback. If creation
   fails, set `reservation.az` to another AZ and re-apply.
-
-### Using an existing ODCR or Capacity Block
-
-Set `reservation.id` to target an existing reservation instead of creating one. This is the only
-way to use an EC2 Capacity Block for ML, since Capacity Blocks are purchased ahead of time (via the
-EC2 console or CLI) and Terraform cannot create one:
-
-```bash
-terraform apply -var 'nodepools={"static-capacity-dynamic-overflow"={reservation={id="cr-0123456789abcdef0",instance_count=3}}}'
-```
-
-When `id` is set, Terraform skips creating an ODCR and the NodeClass selects the reservation
-directly by ID; `instance_type` and `az` are ignored. Still set `instance_count` to match the
-existing reservation's size - it sizes the static pool's replicas and isn't read back from the
-reservation itself.
 
 ## Clean up
 
