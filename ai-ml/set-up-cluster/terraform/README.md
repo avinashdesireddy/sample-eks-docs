@@ -118,6 +118,21 @@ terraform apply -var 'enable_efa=true' -var 'nodepools={"reserved-spot-ondemand"
 (Kubeflow), which manages distributed `MPIJob` resources - useful for running multi-node NCCL/EFA
 tests. It's not installed when `enable_efa` is `false`.
 
+## Ingress (ALB)
+
+Both variants set up a default `alb` `IngressClass` so an `Ingress` resource with no
+`ingressClassName` gets an Application Load Balancer automatically. What each variant installs
+differs:
+
+- `auto-mode/`: EKS Auto Mode has an ALB controller built into the control plane already, so this
+  is just an `IngressClass` + `IngressClassParams` (`scheme: internet-facing`) - no Helm install,
+  no IAM policy.
+- `karpenter/`: self-managed Karpenter has no built-in load balancer controller, so this installs
+  the full [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
+  (IAM role/policy, pod identity association, Helm release) plus the `IngressClass`.
+
+Both are always on (no switch) - create an `Ingress` and an ALB is provisioned for you.
+
 ## Clean up
 
 To remove GPU NodePools while keeping the cluster running, drop the strategy by applying back to
