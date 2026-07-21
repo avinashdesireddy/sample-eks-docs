@@ -76,6 +76,48 @@ Notes:
   or fails with `InsufficientInstanceCapacity` - there is no automatic AZ fallback. If creation
   fails, set `reservation.az` to another AZ and re-apply.
 
+## EFA
+
+The EFA device plugin is needed if you're on an EFA-capable instance size (`g*.8xlarge`/`.16xlarge`
+and larger, `p*` family) and want to use EFA for inter-instance networking or with FSx for Lustre.
+`var.enable_efa` (default `false`) installs the plugin plus a shared SG self-referencing rule EFA
+requires. Turn it on if either:
+
+- A NodeClass requests EFA network interfaces for **static** capacity (e.g. `networkInterfaces`
+  with `interfaceType: efa-only` on a capacity-block pool), or
+- A pod requests the `vpc.amazonaws.com/efa` extended resource for **dynamic** capacity:
+
+  ```yaml
+  resources:
+    limits:
+      vpc.amazonaws.com/efa: 8
+    requests:
+      vpc.amazonaws.com/efa: 8
+  ```
+
+Leave `enable_efa` off if neither applies.
+
+```bash
+terraform apply -var 'enable_efa=true'
+```
+
+Combine with a GPU NodePool:
+
+```bash
+terraform apply -var 'enable_efa=true' -var 'nodepools={"spot-ondemand"={}}'
+```
+
+Or with a reservation - note the default `reservation.instance_type` (`g6e.4xlarge`) isn't
+EFA-capable, so override it to `.8xlarge` or larger:
+
+```bash
+terraform apply -var 'enable_efa=true' -var 'nodepools={"reserved-spot-ondemand"={reservation={instance_type="g6e.8xlarge",instance_count=1}}}'
+```
+
+`var.enable_efa` also installs the [MPI Operator](https://github.com/kubeflow/mpi-operator)
+(Kubeflow), which manages distributed `MPIJob` resources - useful for running multi-node NCCL/EFA
+tests. It's not installed when `enable_efa` is `false`.
+
 ## Clean up
 
 To remove GPU NodePools while keeping the cluster running, drop the strategy by applying back to

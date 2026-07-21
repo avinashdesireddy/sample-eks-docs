@@ -33,6 +33,17 @@ locals {
 
     eks-node-monitoring-agent = {
       preserve = false
+      configuration_values = jsonencode({
+        dcgmAgent = {
+          tolerations = [
+            {
+              key      = "nvidia.com/gpu"
+              operator = "Exists"
+              effect   = "NoSchedule"
+            }
+          ]
+        }
+      })
     }
 
     aws-ebs-csi-driver = {

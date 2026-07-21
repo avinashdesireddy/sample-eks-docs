@@ -35,6 +35,18 @@ variable "nvidia_device_plugin_version" {
   default     = "0.19.1"
 }
 
+variable "enable_efa" {
+  description = "Install the AWS EFA Kubernetes device plugin and the shared SG self-referencing rule EFA requires. Only relevant if a GPU NodePool's EC2NodeClass requests EFA network interfaces (e.g. a static capacity-block pool on EFA-capable instance types)."
+  type        = bool
+  default     = false
+}
+
+variable "efa_device_plugin_version" {
+  description = "AWS EFA Kubernetes device plugin chart version (aws-efa-k8s-device-plugin, from eks-charts)."
+  type        = string
+  default     = "v0.5.29"
+}
+
 variable "allowed_cidrs" {
   description = "CIDRs allowed to reach any publicly accessible endpoint this stack creates (EKS API, ALB)."
   type        = list(string)

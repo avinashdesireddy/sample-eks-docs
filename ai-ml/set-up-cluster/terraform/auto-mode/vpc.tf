@@ -91,6 +91,18 @@ resource "aws_vpc_security_group_egress_rule" "shared_all" {
   ip_protocol       = "-1"
 }
 
+# EFA requires the security group to explicitly allow all traffic to/from itself (self-referencing
+# both directions), not just a same-VPC or 0.0.0.0/0 egress rule. Gated by var.enable_efa.
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html#efa-start-security
+resource "aws_vpc_security_group_egress_rule" "shared_self" {
+  count = var.enable_efa ? 1 : 0
+
+  description                  = "Self-egress, all protocols (required for EFA)"
+  security_group_id            = aws_security_group.shared.id
+  referenced_security_group_id = aws_security_group.shared.id
+  ip_protocol                  = "-1"
+}
+
 module "vpc_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
   version = "6.6.1"

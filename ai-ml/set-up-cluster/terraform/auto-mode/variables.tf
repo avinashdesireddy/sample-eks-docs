@@ -47,6 +47,18 @@ variable "dcgm_exporter_version" {
   default     = "4.8.2"
 }
 
+variable "enable_efa" {
+  description = "Install the AWS EFA Kubernetes device plugin and the shared SG self-referencing rule EFA requires. EKS Auto Mode does not bundle the EFA device plugin, so this is required for any GPU NodePool that requests EFA network interfaces (e.g. a static capacity-block pool on EFA-capable instance types)."
+  type        = bool
+  default     = false
+}
+
+variable "efa_device_plugin_version" {
+  description = "AWS EFA Kubernetes device plugin chart version (aws-efa-k8s-device-plugin, from eks-charts)."
+  type        = string
+  default     = "v0.5.29"
+}
+
 variable "nodepools" {
   description = <<-EOT
     GPU NodePool strategies to enable, keyed by folder name under nodepools/. Defaults to
