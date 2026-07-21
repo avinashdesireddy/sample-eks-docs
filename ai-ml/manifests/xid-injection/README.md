@@ -1,209 +1,144 @@
 # XID Fault Injection Testing
 
-Manifests and a script for testing GPU error detection and node repair on EKS, by simulating
-NVIDIA XID errors without needing a real hardware fault.
+Manifest for testing GPU error detection and automatic node repair on EKS, by simulating an NVIDIA XID error without needing a real hardware fault. Works on **EKS Auto Mode** and on **self-managed Karpenter / managed node groups**.
 
 Reference: https://docs.aws.amazon.com/eks/latest/userguide/node-health-nma.html
 
 ## Background: GPU health detection and node repair
 
-The EKS node monitoring agent (`eks-node-monitoring-agent` addon) monitors GPU health via DCGM
-and sets the `AcceleratedHardwareReady` node condition. Karpenter's `nodeRepair` feature gate (or
-EKS Auto Mode's built-in equivalent) watches this condition and replaces nodes after a 10-minute
-toleration.
+The EKS **node monitoring agent** detects GPU health issues via its DCGM component (`nv-hostengine`) and sets the `AcceleratedHardwareReady` node condition; EKS **automatic node repair** watches that condition and reboots or replaces the node after a default 10-minute wait. How the agent is packaged differs by cluster type, but in both cases its `nv-hostengine` is reachable at `localhost:5555` from a `hostNetwork` pod:
+
+- **EKS Auto Mode** - the node monitoring agent is built into the node AMI and always on; there is no `eks-node-monitoring-agent` add-on to install and no `dcgm-server` pod.
+- **Self-managed Karpenter / managed node groups** - install the `eks-node-monitoring-agent` add-on, which runs a dcgm-server DaemonSet containing nv-hostengine (reachable at localhost:5555 from hostNetwork pods or by exec'ing into the dcgm-server pod directly). On Karpenter it needs the `dcgmAgent` toleration to schedule on GPU-tainted nodes (configured in `../../set-up-cluster/terraform/karpenter/eks.tf`).
+
+Note the two DCGM components serve different purposes:
+- **Node monitoring agent** (health detection/repair) - includes its own `nv-hostengine`. This is what turns an XID error into a node condition.
+- **dcgm-exporter** - the GPU Prometheus metrics exporter, installed separately by this repo's monitoring stack (pods in the `monitoring` namespace). It exports metrics and is not involved in node repair.
 
 Detection path:
-
 ```
-NVIDIA Driver → DCGM Host Engine (nv-hostengine) → Policy Violation Channel → Monitoring Agent → Node Condition → Node Repair
-```
-
-### Prerequisites for GPU health monitoring
-
-The `eks-node-monitoring-agent` addon must have the `dcgmAgent` toleration for GPU-tainted nodes.
-Without it, the `dcgm-server` DaemonSet won't schedule on GPU nodes and the monitoring agent
-cannot perform GPU health checks. This is already configured in
-`../../set-up-cluster/terraform/{auto-mode,karpenter}/eks.tf`:
-
-```hcl
-eks-node-monitoring-agent = {
-  configuration_values = jsonencode({
-    dcgmAgent = {
-      tolerations = [{
-        key      = "nvidia.com/gpu"
-        operator = "Exists"
-        effect   = "NoSchedule"
-      }]
-    }
-  })
-}
-```
-
-### Verify GPU health monitoring
-
-```bash
-# Check dcgm-server is running on GPU nodes
-kubectl get ds dcgm-server -n kube-system
-
-# Check node condition
-kubectl get nodes -o custom-columns='NAME:.metadata.name,ACCELERATOR_READY:.status.conditions[?(@.type=="AcceleratedHardwareReady")].status,REASON:.status.conditions[?(@.type=="AcceleratedHardwareReady")].reason'
-
-# Check for XID events
-kubectl get events -A | grep -i NvidiaXID
+NVIDIA Driver → DCGM Host Engine (nv-hostengine) → Policy Violation Channel → Node Monitoring Agent → Node Condition → Node Repair
 ```
 
 ### Node repair behavior
 
-- Watches `AcceleratedHardwareReady=False` with a **10-minute toleration**
-- Bypasses disruption budgets (forceful repair)
-- Safety: will not repair if >20% of NodePool nodes are unhealthy (rounds up, so 1 unhealthy out
-  of 1 total is allowed)
+- Watches `AcceleratedHardwareReady=False` with a **10-minute wait**.
+- On EKS Auto Mode all `AcceleratedHardwareReady` repairs are **Replace**. On managed node groups some XIDs Reboot instead (see the table below).
 
-### NVIDIA XID codes and repair actions
+### NVIDIA XID codes
 
-The monitoring agent detects XID errors from the NVIDIA driver via DCGM. Well-known critical XIDs
-set `AcceleratedHardwareReady=False` and trigger auto repair. Non-critical XIDs are logged as
-Kubernetes events only.
+Well-known critical XIDs set `AcceleratedHardwareReady=False` and trigger auto repair; non-critical XIDs are logged as Kubernetes events only. Full reference: https://docs.aws.amazon.com/eks/latest/userguide/node-health-nma.html
 
-Full reference: https://docs.aws.amazon.com/eks/latest/userguide/node-health-nma.html
+| XID | Description | Repair (managed node groups) |
+|-----|-------------|------------------------------|
+| 48 | Double Bit ECC Error | Reboot |
+| 63 | GPU memory remapping event | Reboot |
+| 95 | Uncontained memory error | Reboot |
+| 109 | Context switch timeout | Reboot |
+| 143 | GPU initialization error | Reboot |
+| 64 | GPU memory remapping failure | Replace |
+| 74 | NVLink Error | Replace |
+| 79 | GPU has fallen off the bus | Replace |
+| 119 | GSP RPC Timeout | Replace |
+| 120 | GSP Error | Replace |
+| 151 | Key rotation error (H100/B100/GB200) | Replace |
 
-**Reboot action XIDs:**
+On EKS Auto Mode every well-known XID above results in **Replace** regardless of the "managed node group" column.
 
-| XID | Description |
-|-----|-------------|
-| 46 | GPU stopped processing |
-| 48 | Double Bit ECC Error |
-| 54 | Auxiliary power not connected |
-| 62 | Internal micro-controller halt |
-| 63 | GPU memory remapping event |
-| 95 | Uncontained memory error |
-| 109 | Context switch timeout |
-| 110 | Security fault error |
-| 136 | Link training failed |
-| 140 | ECC Unrecovered Error |
-| 143 | GPU initialization error |
-| 155 | NVLink software-defined error |
-| 156 | Resource retirement event |
-| 158 | GPU fatal timeout |
+## Injection method
 
-**Replace action XIDs:**
+XID errors are detected through DCGM's **policy violation channel**, not by parsing kernel logs (source: [`aws/eks-node-monitoring-agent`](https://github.com/aws/eks-node-monitoring-agent), `monitors/nvidia/dcgm/dcgm_client.go` registers `dcgmapi.XidPolicy`). So the reliable simulation is injecting into DCGM's XID field (230) with `dcgmi test --inject`.
 
-| XID | Description |
-|-----|-------------|
-| 64 | GPU memory remapping failure |
-| 74 | NVLink Error |
-| 79 | GPU has fallen off the bus |
-| 119 | GSP RPC Timeout |
-| 120 | GSP Error |
-| 142 | NVENC3 Error (GB200) |
-| 151 | Key rotation error (H100/B100/GB200) |
-
-## Injection methods
-
-### DCGM injection (recommended - works for any XID code)
-
-The most reliable method is injecting directly into DCGM's field cache via `dcgmi`. This uses the
-same detection path as real hardware faults and works for any XID code, including critical ones
-that trigger node repair.
-
-Reference: https://github.com/jicowan/hma-cli/blob/main/pkg/simulator/accelerator/nvidia.go#L92
-
-`xid-dcgmi-inject.yaml` documents the commands to run (it prints usage from a pod, but the actual
-injection runs from your workstation against the `dcgm-server` pod):
+The node's host filesystem has no `dcgmi` binary, so `xid-inject.yaml` brings its own (from a DCGM image matching the agent's DCGM major version) and connects over host networking to the agent's `nv-hostengine` on `localhost:5555` - which works the same on Auto Mode (in-AMI agent) and Karpenter (`dcgm-server` DaemonSet with `hostPort 5555`).
 
 ```bash
-# Find the dcgm-server pod on the GPU node
-DCGM_POD=$(kubectl get pods -n kube-system -l k8s-app=dcgm-server -o jsonpath='{.items[0].metadata.name}')
-
-# Inject XID 79 (Replace action) — field 230 = xid_errors
-kubectl exec -n kube-system $DCGM_POD -- dcgmi test --inject --gpuid 0 -f 230 -v 79
+# Set spec.nodeName to the target GPU node, then:
+kubectl apply -f xid-inject.yaml
+kubectl logs -f xid-inject
 ```
 
-**Simulate node replacement (XID 79):**
+The pod injects one XID on one GPU, set via env vars (defaults `XID_CODE="79"`, `GPU_ID="0"`):
 
-```bash
-kubectl exec -n kube-system $DCGM_POD -- dcgmi test --inject --gpuid 0 -f 230 -v 79
-# XID 79 = GPU has fallen off the bus → Replace
+```yaml
+env:
+  - name: XID_CODE
+    value: "79"    # 79 = GPU fell off the bus -> Replace
+  - name: GPU_ID
+    value: "0"
 ```
 
-**Simulate node reboot (XID 48):**
+One critical XID on one GPU is a complete repair test - `AcceleratedHardwareReady` is a *node-level* condition, so the first critical XID already marks the whole node for replacement; injecting more XIDs or more GPUs adds nothing to the repair signal. For firing several codes (e.g. warning-only XIDs to exercise your event/alerting pipeline without replacing the node), use the on-demand
+
+`kubectl exec` path below.
+
+### Dynamic (on-demand) injection
+
+The pod idles after its injection (`sleep 3600`), so it doubles as a live injection client. Exec into it to inject any XID into any GPU on demand - no YAML edits or re-apply. `dcgmi` defaults to `localhost:5555`, so pass no host flag (note `-h` means `--help`, not host):
 
 ```bash
-kubectl exec -n kube-system $DCGM_POD -- dcgmi test --inject --gpuid 0 -f 230 -v 48
-# XID 48 = Double Bit ECC Error → Reboot
+kubectl exec -it xid-inject -- dcgmi test --inject --gpuid 0 -f 230 -v 79
+# → Successfully injected field info.
 ```
 
-**Simulate warning event (XID 13):**
+To fire several codes (e.g. warning-only XIDs, which emit events but don't replace the node), loop from your workstation:
 
 ```bash
-kubectl exec -n kube-system $DCGM_POD -- dcgmi test --inject --gpuid 0 -f 230 -v 13
-# XID 13 = Graphics Engine Exception → Warning event only
+for xid in 13 31 43; do
+  kubectl exec xid-inject -- dcgmi test --inject --gpuid 0 -f 230 -v $xid
+done
 ```
 
-Verify detection:
+> On Karpenter you can alternatively exec straight into the add-on's `dcgm-server` pod (`kubectl exec -n kube-system <dcgm-server-pod> -- dcgmi test --inject ...`) - the `xid-inject` pod is not required there, but it works identically and keeps one manifest for both cluster types.
+
+### Verify detection
 
 ```bash
-# Check events (appears within 30 seconds)
+# Events (appear within ~30 seconds)
 kubectl get events -A | grep NvidiaXID
 
-# Check node condition
-kubectl describe node <gpu-node> | grep -A3 AcceleratedHardwareReady
-# Expected: False / DCGMHealthCode120 with "detected XID-79"
+# Node condition
+kubectl get nodes -o custom-columns='NAME:.metadata.name,ACCEL:.status.conditions[?(@.type=="AcceleratedHardwareReady")].status,REASON:.status.conditions[?(@.type=="AcceleratedHardwareReady")].reason'
+# Expected: False / NvidiaXID79Error
 ```
 
-### CUDA fault injection (triggers driver errors)
+Verified result on a `p6-b200.48xlarge` node - injecting XID 79 produced:
 
-`xid-cuda-fault.yaml` triggers XID 13 via illegal memory access. This is a real driver fault but
-only produces a non-critical warning event.
-
-```bash
-kubectl apply -f xid-cuda-fault.yaml
-kubectl logs -f xid-cuda-fault
-
-# Verify
-kubectl get events -A | grep NvidiaXID
-# Expected: NvidiaXID13Warning: detected unknown XID-13 on the instance
 ```
-
-### Kernel log injection (dmesg only - NOT detected by DCGM)
-
-`xid.sh` writes XID-formatted messages to `/dev/kmsg`. These appear in dmesg but are **not
-detected by DCGM or the monitoring agent**, because the detection path is purely through the DCGM
-API, not kernel log parsing. Useful only for testing dmesg-based tooling you control.
-
-```bash
-sudo ./xid.sh xid 13 0   # inject XID 13 for GPU 0
-sudo ./xid.sh sxid 1     # inject SXID 1
-sudo ./xid.sh both       # inject both (default XID 13, SXID 1)
-```
-
-`journal-check.yaml` is a debugging pod that reads the host's journal/dmesg to confirm whether an
-injected message actually landed in the kernel log, useful when validating `xid.sh` injections.
-
-```bash
-kubectl apply -f journal-check.yaml
-kubectl logs journal-check
+AcceleratedHardwareReady  True → False  Reason: NvidiaXID79Error
+Message: detected XID-79 on the instance, review kernel logs for additional information.
 ```
 
 ## Observing the full repair cycle
 
-After a critical XID sets `AcceleratedHardwareReady=False`:
+After a critical XID sets `AcceleratedHardwareReady=False`, repair kicks in after the 10-minute wait. How you observe it differs by cluster type.
+
+### EKS Auto Mode
+
+Node auto-repair is always on and fully managed - Karpenter runs in the AWS-managed control plane, so there is no `karpenter` controller pod to tail. Observe via node conditions, events, and NodeClaims:
 
 ```bash
-# Watch Karpenter detect and repair (10-minute toleration)
-kubectl logs -n kube-system -l app.kubernetes.io/name=karpenter -f | grep -iE "repair|health|unhealthy|terminat"
-
-# Watch NodeClaim replacement
-kubectl get nodeclaims -w
-
-# Watch node condition
+# Watch the node condition flip to False, and NodeClaim replacement
 kubectl get nodes -o custom-columns='NAME:.metadata.name,READY:.status.conditions[?(@.type=="AcceleratedHardwareReady")].status,REASON:.status.conditions[?(@.type=="AcceleratedHardwareReady")].reason' -w
 ```
 
-Expected sequence:
+```bash 
+kubectl get nodeclaims
+kubectl get events -A --sort-by=.lastTimestamp | grep -iE "disrupt|unhealthy|terminat|NvidiaXID"
+```
+
+### Self-managed Karpenter
+
+The Karpenter controller runs as a pod in `kube-system`, so you can tail it directly:
+
+```bash
+kubectl logs -n kube-system -l app.kubernetes.io/name=karpenter -f | grep -iE "repair|health|unhealthy|terminat"
+kubectl get nodeclaims -w
+```
+
+Expected sequence (both):
 1. Critical XID detected → `AcceleratedHardwareReady=False`
-2. 10 minutes pass (toleration period)
-3. Karpenter: `deleting unhealthy node`
+2. 10 minutes pass (wait period)
+3. Repair begins (Karpenter logs `deleting unhealthy node`; Auto Mode does this silently)
 4. Node tainted with `karpenter.sh/disrupted:NoSchedule`
 5. New NodeClaim created → replacement node launches
 6. Old node terminated
@@ -211,5 +146,7 @@ Expected sequence:
 ## Cleanup
 
 ```bash
-kubectl delete pod xid-cuda-fault journal-check xid-dcgmi-inject 2>/dev/null
+kubectl delete pod xid-inject 2>/dev/null
 ```
+
+Note: the injected XID persists in DCGM until the node is replaced. If auto repair is enabled, the faulted node is replaced automatically after the 10-minute wait; otherwise clear the condition by replacing the node (a `dcgmi` injection cannot be "un-injected").
