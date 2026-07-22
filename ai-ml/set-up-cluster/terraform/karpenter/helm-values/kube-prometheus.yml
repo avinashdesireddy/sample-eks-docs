@@ -70,6 +70,17 @@ kube-state-metrics:
 
 grafana:
   enabled: true
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    labels:
+      guide: ai-eks-docs
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/inbound-cidrs: ${grafana_cidr}
+      alb.ingress.kubernetes.io/load-balancer-name: grafana-ai-eks-docs
+      alb.ingress.kubernetes.io/healthcheck-path: /api/health
   resources:
     requests:
       cpu: 100m

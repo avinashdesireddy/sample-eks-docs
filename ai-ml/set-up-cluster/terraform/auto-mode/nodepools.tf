@@ -4,8 +4,7 @@ locals {
   nodepools_dir = "${path.module}/nodepools"
 
   # Flatten every enabled strategy folder to { filename => { path, strategy } }. Keying by filename
-  # (not folder) keeps each pool's address stable; carrying the strategy lets templates pull that
-  # strategy's reservation config (e.g. static replicas = ODCR instance_count).
+  # (not folder) keeps each pool's address stable.
   manifests = merge([
     for strategy in keys(var.nodepools) : {
       for file in fileset("${local.nodepools_dir}/${strategy}", "*.yml") :
@@ -51,10 +50,7 @@ resource "kubectl_manifest" "nodeclasses" {
 resource "kubectl_manifest" "nodepools" {
   for_each = local.nodepool_files
 
-  yaml_body = templatefile(each.value.path, {
-    # Static pools size their replicas to the ODCR instance count; ignored by pools that don't use it.
-    replicas = try(var.nodepools[each.value.strategy].reservation.instance_count, 1)
-  })
+  yaml_body = file(each.value.path)
 
   depends_on = [kubectl_manifest.nodeclasses, module.eks]
 }

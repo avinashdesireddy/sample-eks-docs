@@ -1,0 +1,84 @@
+# XID fault injection for GPU nodes - works on EKS Auto Mode AND self-managed Karpenter / managed
+# node groups.
+#
+# The EKS node monitoring agent detects XID errors via the DCGM *policy violation* channel.
+#
+# One critical XID on one GPU is a complete repair test: AcceleratedHardwareReady is a node-level
+# condition, so the first critical XID already dooms the whole node - injecting more XIDs or more
+# GPUs adds nothing. To fire several XIDs (e.g. warning-only codes for event-pipeline testing) use
+# the on-demand `kubectl exec` path in the README.
+#
+# Usage:
+#   1. Set nodeName to the GPU node you want to fault.
+#   2. Optionally change XID_CODE (default 79 = "GPU fell off the bus" -> Replace) and GPU_ID.
+#   3. kubectl apply -f xid-inject.yaml && kubectl logs -f xid-inject
+#   4. Verify:  kubectl get events -A | grep NvidiaXID
+#               kubectl get nodes -o custom-columns='NAME:.metadata.name,ACCEL:.status.conditions[?(@.type=="AcceleratedHardwareReady")].status,REASON:.status.conditions[?(@.type=="AcceleratedHardwareReady")].reason'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: xid-inject
+spec:
+  # nodeName: i-075b27706ebbba266   # REQUIRED: pin to the GPU node whose nv-hostengine you target
+  hostNetwork: true                 # so localhost:5555 reaches the node's nv-hostengine
+  hostPID: true
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  restartPolicy: Never
+  containers:
+    - name: inject
+      image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-ubuntu22.04
+      securityContext:
+        privileged: true
+      env:
+        - name: XID_CODE
+          value: "79"
+        - name: GPU_ID
+          value: "0"
+        - name: DCGM_HOST
+          value: "localhost:5555"
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -uo pipefail
+
+          echo "=== EKS XID injection (DCGM field 230 -> XidPolicy) ==="
+          echo "Target nv-hostengine: ${DCGM_HOST} | XID: ${XID_CODE} | GPU: ${GPU_ID}"
+          echo
+
+          echo "### Step 1: is nv-hostengine reachable on ${DCGM_HOST}?"
+          host="${DCGM_HOST%%:*}"; port="${DCGM_HOST##*:}"
+          if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${host}/${port}" 2>/dev/null; then
+            echo "  OK: ${DCGM_HOST} is open (agent's nv-hostengine is listening)."
+          else
+            echo "  UNREACHABLE: ${DCGM_HOST} is not accepting connections."
+            echo "  The node monitoring agent may bind nv-hostengine to a non-host-visible namespace,"
+            echo "  or the port differs. Nothing was injected. Investigate before proceeding."
+            sleep 3600; exit 0
+          fi
+          echo
+
+          # NOTE: in dcgmi, `-h` means --help, NOT host. dcgmi connects to localhost:5555 by
+          # default, which is exactly where the agent's nv-hostengine listens, so we pass no host
+          # flag. (Passing `-h host:port` silently prints help and exits 0 - injecting nothing.)
+
+          echo "### Step 2: enumerate GPUs dcgmi can see on this node (default localhost:5555)"
+          dcgmi discovery -l || echo "  (discovery failed - see error above)"
+          echo
+
+          echo "### Step 3: inject XID ${XID_CODE} on GPU ${GPU_ID} into field 230 (DCGM_FI_DEV_XID_ERRORS)"
+          if dcgmi test --inject --gpuid "${GPU_ID}" -f 230 -v "${XID_CODE}"; then
+            echo "  -> injected. Expect NvidiaXID${XID_CODE}Error/Warning; a well-known critical XID"
+            echo "     sets AcceleratedHardwareReady=False -> node Replace after the 10-min toleration."
+          else
+            echo "  -> FAILED (may surface as DCGMFieldError/DCGMHealthCode - check events)"
+          fi
+          echo
+          echo "Verify from your workstation:"
+          echo "  kubectl get events -A | grep NvidiaXID"
+          echo "  kubectl get nodes -o custom-columns='NAME:.metadata.name,ACCEL:.status.conditions[?(@.type==\"AcceleratedHardwareReady\")].status,REASON:.status.conditions[?(@.type==\"AcceleratedHardwareReady\")].reason'"
+          echo
+          echo "=== pod idles so you can re-run dcgmi manually: kubectl exec -it xid-inject -- bash ==="
+          sleep 3600

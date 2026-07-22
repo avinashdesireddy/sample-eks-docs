@@ -1,0 +1,132 @@
+# FSx for Lustre mount + throughput test for the EKS Auto Mode cluster.
+#
+# Mounts the static claim provisioned by terraform (fsx-lustre-claim, namespace default) and
+# exercises the full CSI path: mount -> write -> cross-pod read-back (ReadWriteMany) -> fio
+# throughput -> Lustre striping inspection.
+#
+# On Auto Mode the mount is over TCP (the node-level EFA-accelerated Lustre client needs a userData
+# bootstrap Auto Mode does not support - see manifests/fsx-lustre/README.md). No EFA resource is
+# requested here; the pods run on the built-in general-purpose NodePool, not the GPU nodes.
+#
+#   kubectl apply -f fsx-lustre-test.yaml
+#   kubectl logs -f job/fsx-lustre-writer    # write + fio benchmark + lfs checks
+#   kubectl logs -f job/fsx-lustre-reader    # cross-node read-back
+#   kubectl delete -f fsx-lustre-test.yaml
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fsx-lustre-writer
+  namespace: default
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: fsx-lustre-test
+        role: writer
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: writer
+          image: public.ecr.aws/amazonlinux/amazonlinux:2023
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo "=== FSx for Lustre write + benchmark ==="
+              echo "Mount (expect type 'lustre', server reachable over @tcp):"
+              df -hT /data
+              echo
+
+              # 1. Correctness: write a marker the reader Job checks from another node.
+              # Use $HOSTNAME (bash builtin) - the minimal image has no 'hostname' binary.
+              MARKER=/data/hello-from-$HOSTNAME
+              echo "written by $HOSTNAME at $(date -u +%FT%TZ)" > "$MARKER"
+              echo "Wrote marker: $MARKER"; cat "$MARKER"
+              echo
+
+              # 2. Lustre striping: capacity determines OST count (1 OST per 2400 GiB); more OSTs =
+              #    more parallel throughput. lfs is preinstalled on the FSx CSI mount namespace only
+              #    on the node, so guard for its absence in the container.
+              if command -v lfs >/dev/null 2>&1; then
+                echo "=== lfs df -h /data ==="; lfs df -h /data || true
+                echo "=== lfs getstripe (marker) ==="; lfs getstripe "$MARKER" || true
+              else
+                echo "lfs client not in image; 'lustre' mount type above confirms the CSI mount."
+              fi
+              echo
+
+              # 3. Throughput: quick single-job write, then a scaled multi-job write.
+              dnf install -y -q fio
+              echo "=== fio quick check (1 job, 1 GiB) ==="
+              fio --name=seqwrite --rw=write --bs=16M --size=1G --numjobs=1 \
+                  --directory=/data --ioengine=sync --group_reporting
+              echo
+              echo "=== fio scaled write (8 jobs, 4 GiB each) ==="
+              fio --name=seqwrite --rw=write --bs=1M --size=4G --numjobs=8 \
+                  --directory=/data --direct=1 --ioengine=libaio --iodepth=32 \
+                  --group_reporting
+              echo
+              echo "Write test complete. Reader Job verifies cross-node read-back."
+          volumeMounts:
+            - name: fsx
+              mountPath: /data
+      volumes:
+        - name: fsx
+          persistentVolumeClaim:
+            claimName: fsx-lustre-claim
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fsx-lustre-reader
+  namespace: default
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: fsx-lustre-test
+        role: reader
+    spec:
+      restartPolicy: Never
+      # Prefer a different node than the writer to exercise shared multi-node (RWX) access.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: fsx-lustre-test
+                    role: writer
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: reader
+          image: public.ecr.aws/amazonlinux/amazonlinux:2023
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              echo "=== FSx for Lustre cross-node read-back ==="
+              echo "Reader pod: $HOSTNAME"; df -hT /data
+              echo "Waiting for a writer marker on the shared filesystem..."
+              for i in $(seq 1 60); do
+                if ls /data/hello-from-* >/dev/null 2>&1; then
+                  echo "Found marker(s):"
+                  for f in /data/hello-from-*; do echo "  $f:"; sed 's/^/    /' "$f"; done
+                  echo "SUCCESS: reader $HOSTNAME read data written by another pod."
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "FAILED: no marker appeared within 5 minutes." >&2
+              exit 1
+          volumeMounts:
+            - name: fsx
+              mountPath: /data
+      volumes:
+        - name: fsx
+          persistentVolumeClaim:
+            claimName: fsx-lustre-claim

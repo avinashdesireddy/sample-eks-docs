@@ -20,7 +20,7 @@ variable "kubernetes_version" {
 variable "karpenter_version" {
   description = "Karpenter chart version (CRD + controller releases)."
   type        = string
-  default     = "1.13.0"
+  default     = "1.14.0"
 }
 
 variable "enable_karpenter_node_repair" {
@@ -35,10 +35,34 @@ variable "nvidia_device_plugin_version" {
   default     = "0.19.1"
 }
 
+variable "enable_efa" {
+  description = "Install the AWS EFA Kubernetes device plugin and the shared SG self-referencing rule EFA requires. Only relevant if a GPU NodePool's EC2NodeClass requests EFA network interfaces (e.g. a static capacity-block pool on EFA-capable instance types)."
+  type        = bool
+  default     = false
+}
+
+variable "efa_device_plugin_version" {
+  description = "AWS EFA Kubernetes device plugin chart version (aws-efa-k8s-device-plugin, from eks-charts)."
+  type        = string
+  default     = "v0.5.29"
+}
+
+variable "alb_controller_version" {
+  description = "AWS Load Balancer Controller chart version (aws-load-balancer-controller, from eks-charts)."
+  type        = string
+  default     = "3.4.2"
+}
+
 variable "allowed_cidrs" {
   description = "CIDRs allowed to reach any publicly accessible endpoint this stack creates (EKS API, ALB)."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "my_cidr" {
+  description = "CIDR allowed to reach the Grafana ALB Ingress. Defaults to 0.0.0.0/0 (open to the world); override with your own IP/32 to restrict access."
+  type        = string
+  default     = "0.0.0.0/0"
 }
 
 variable "enable_amazon_prometheus" {
@@ -68,7 +92,7 @@ variable "dcgm_exporter_version" {
 variable "nodepools" {
   description = <<-EOT
     GPU NodePool strategies to enable, keyed by folder name under nodepools/. Defaults to
-    { "spot-ondemand" = {} }. Set `reservation` on a strategy to have Terraform create a
+    {} (no GPU NodePools). Set `reservation` on a strategy to have Terraform create a
     tagged On-Demand Capacity Reservation (ODCR) for it; the NodeClass selects it by the
     nodepool=<key> tag. An ODCR bills immediately until destroyed.
 
@@ -82,14 +106,13 @@ variable "nodepools" {
       az             = optional(string, "") # defaults to the first cluster AZ
     }))
   }))
-  default = { "spot-ondemand" = {} }
+  default = {}
 
   validation {
     condition = alltrue([
       for k in keys(var.nodepools) : contains([
         "spot-ondemand",
         "reserved-spot-ondemand",
-        "static-spot-ondemand",
       ], k)
     ])
     error_message = "Each key must be an existing strategy folder under nodepools/."
@@ -99,16 +122,15 @@ variable "nodepools" {
     condition = length(setintersection(keys(var.nodepools), [
       "spot-ondemand",
       "reserved-spot-ondemand",
-      "static-spot-ondemand",
     ])) <= 1
-    error_message = "Enable at most one GPU inference strategy (spot-ondemand, reserved-spot-ondemand, static-spot-ondemand); each is a complete solution for the gpu-inf workload."
+    error_message = "Enable at most one GPU inference strategy (spot-ondemand, reserved-spot-ondemand); each is a complete solution for the gpu-inf workload."
   }
 
   validation {
     condition = alltrue([
       for k, v in var.nodepools :
-      contains(["reserved-spot-ondemand", "static-spot-ondemand"], k) ? v.reservation != null : true
+      contains(["reserved-spot-ondemand"], k) ? v.reservation != null : true
     ])
-    error_message = "reserved-spot-ondemand and static-spot-ondemand require a `reservation` (their reserved nodes run on an ODCR)."
+    error_message = "reserved-spot-ondemand requires a `reservation` (its reserved nodes run on an ODCR)."
   }
 }
