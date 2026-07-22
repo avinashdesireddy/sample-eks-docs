@@ -59,6 +59,12 @@ variable "allowed_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "my_cidr" {
+  description = "CIDR allowed to reach the Grafana ALB Ingress. Defaults to 0.0.0.0/0 (open to the world); override with your own IP/32 to restrict access."
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
 variable "enable_amazon_prometheus" {
   description = "Provision an Amazon Managed Prometheus workspace and IAM for the scraper."
   type        = bool

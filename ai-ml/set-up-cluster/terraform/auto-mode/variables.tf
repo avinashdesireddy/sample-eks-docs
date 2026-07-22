@@ -14,13 +14,19 @@ variable "cluster_name" {
 variable "kubernetes_version" {
   description = "Kubernetes minor version for the EKS control plane."
   type        = string
-  default     = "1.35"
+  default     = "1.36"
 }
 
 variable "allowed_cidrs" {
   description = "CIDRs allowed to reach any publicly accessible endpoint this stack creates (EKS API, ALB)."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "my_cidr" {
+  description = "CIDR allowed to reach the Grafana ALB Ingress. Defaults to 0.0.0.0/0 (open to the world); override with your own IP/32 to restrict access."
+  type        = string
+  default     = "0.0.0.0/0"
 }
 
 variable "enable_amazon_prometheus" {

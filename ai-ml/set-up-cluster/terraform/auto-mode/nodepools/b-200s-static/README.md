@@ -23,23 +23,28 @@ EKS Auto Mode manages the AMI, instance store, and node bootstrap, so the fields
 
 - An existing On-Demand Capacity Reservation or Capacity Block for `p6-b200.48xlarge`.
 
-Look up the reservation and export the values used later when applying the NodeClass and NCCL test:
+Set the region, then look up the reservation and export the values used later when applying the
+NodeClass and NCCL test:
+
+```bash
+export AWS_REGION=ap-south-1
+```
 
 ```bash
 export CAPACITY_RESERVATION_ID=$(aws ec2 describe-capacity-reservations \
-  --region ap-south-1 \
-  --filters "Name=state,Values=active" "Name=instance-type,Values=p6-b200.48xlarge" "Name=availability-zone,Values=ap-south-1c" \
+  --region "$AWS_REGION" \
+  --filters "Name=state,Values=active" "Name=instance-type,Values=p6-b200.48xlarge" \
   --query 'CapacityReservations[0].CapacityReservationId' \
   --output text)
 
 export RESERVED_INSTANCE_COUNT=$(aws ec2 describe-capacity-reservations \
-  --region ap-south-1 \
+  --region "$AWS_REGION" \
   --capacity-reservation-ids "$CAPACITY_RESERVATION_ID" \
   --query 'CapacityReservations[0].TotalInstanceCount' \
   --output text)
 
 export GPUS_PER_INSTANCE=$(aws ec2 describe-instance-types \
-  --region ap-south-1 \
+  --region "$AWS_REGION" \
   --instance-types p6-b200.48xlarge \
   --query 'InstanceTypes[0].GpuInfo.Gpus[0].Count' \
   --output text)
@@ -89,7 +94,7 @@ envsubst < nodeclass-gpu-static.yaml | kubectl apply -f -
 envsubst < nodepool-gpu-static.yaml | kubectl apply -f -
 ```
 
-> **Access entry:** this custom `NodeClass` reuses the cluster's node IAM role (`node_iam_role_name`), for which EKS already creates an EC2 access entry with the `AmazonEKSAutoNodePolicy`. If you point the NodeClass at a *different* role, create the access entry first - see [Create node class access entry][node-class-access].
+> **Access entry:** this custom `NodeClass` reuses the cluster's node IAM role (`node_iam_role_name`), for which EKS already creates an EC2 access entry with the `AmazonEKSAutoNodePolicy`. If you point the NodeClass at a _different_ role, create the access entry first - see [Create node class access entry][node-class-access].
 
 ## Verify
 
@@ -163,10 +168,15 @@ mpijobs.kubeflow.org
 
 ```bash
 envsubst < mpijob-nccl.yaml | cat   # preview
+```
+
+```bash
 envsubst < mpijob-nccl.yaml | kubectl apply -f -
 ```
 
-Follow the launcher logs:
+The launcher pod runs on CPU general-purpose instance and the container image will download slower than on GPU instance with SOCI enabled.
+
+Once the launcher pod in Running, follow the launcher logs:
 
 ```bash
 kubectl logs -f -l training.kubeflow.org/job-role=launcher

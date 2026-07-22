@@ -173,10 +173,15 @@ template variables:
 
 ```bash
 envsubst < mpijob-nccl.yaml | cat   # preview
+```
+
+```bash
 envsubst < mpijob-nccl.yaml | kubectl apply -f -
 ```
 
-Follow the launcher logs:
+The launcher pod runs on CPU general-purpose instance and the container image will download slower than on GPU instance with SOCI enabled.
+
+Once the launcher pod in Running, follow the launcher logs:
 
 ```bash
 kubectl logs -f -l training.kubeflow.org/job-role=launcher
