@@ -21,12 +21,16 @@ cd auto-mode   # or: cd karpenter
 terraform init
 ```
 
-Two flags worth setting on this first apply, since they're easiest to get right upfront:
+Flags worth setting on this first apply, since they're easiest to get right upfront:
 
 - **Recommended:** `var.my_cidr` restricts the Grafana ALB Ingress to just your IP, instead of the
   default `0.0.0.0/0` (open to the world). See [Ingress (ALB)](#ingress-alb).
 - **Optional:** `var.enable_efa` installs the EFA device plugin, only needed if you're running
   EFA-capable GPU workloads. See [EFA](#efa).
+- **Optional:** `var.availability_zones_count` (default `3`) controls how many AZs the VPC and
+  cluster spread across - the subnet CIDRs are computed to fit, so this scales cleanly with the
+  region. If the region has fewer usable AZs (some regions have as few as 2 after excluding AZs
+  that don't support the EKS control plane), the region's max is used instead.
 
 ```bash
 export MY_CIDR="$(curl -s https://checkip.amazonaws.com)/32"
@@ -36,11 +40,11 @@ echo $MY_CIDR
 Expected output: `x.x.x.x/32`
 
 ```bash
-terraform apply -var 'region=us-west-2' -var "my_cidr=${MY_CIDR}" -var 'enable_efa=true'
+terraform apply -var 'region=us-west-2' -var "my_cidr=${MY_CIDR}" -var 'enable_efa=true' -var 'availability_zones_count=4'
 ```
 
-Drop `-var 'enable_efa=true'` if you don't need EFA, or drop `-var 'region=...'` to use the
-default (`us-east-2`).
+Drop any of `-var 'enable_efa=true'`, `-var 'region=...'`, or `-var 'availability_zones_count=...'`
+you don't need - `region` defaults to `us-east-2` and `availability_zones_count` to `3`.
 
 When it finishes, configure `kubectl` (the same command regardless of variant, since the cluster
 name is fixed - match `--region` to whatever you passed to `-var 'region=...'` above, or
@@ -184,11 +188,14 @@ Notes:
 
 ### Manually-applied static pool (existing reservation)
 
-`karpenter/nodepools/b-200s-static/` is a static, reservation-backed `p6-b200.48xlarge` NodePool
-with EFA networking, plus an NCCL test. Unlike the strategies above, it's **not** wired into
-`var.nodepools` - Terraform can't create a Capacity Block for a specific instance type/date, so
-this is applied manually with `kubectl` against a reservation or Capacity Block you already have.
-See [`karpenter/nodepools/b-200s-static/README.md`](karpenter/nodepools/b-200s-static/README.md).
+Both variants have a `nodepools/b-200s-static/` folder: a static, reservation-backed
+`p6-b200.48xlarge` NodePool with EFA networking, plus an NCCL test. Unlike the strategies above,
+it's **not** wired into `var.nodepools` - Terraform can't create a Capacity Block for a specific
+instance type/date, so this is applied manually with `kubectl` against a reservation or Capacity
+Block you already have.
+
+- [`auto-mode/nodepools/b-200s-static/README.md`](auto-mode/nodepools/b-200s-static/README.md)
+- [`karpenter/nodepools/b-200s-static/README.md`](karpenter/nodepools/b-200s-static/README.md)
 
 ## Clean up
 
