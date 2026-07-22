@@ -18,13 +18,13 @@ locals {
     name if !contains(local.excluded_zone_ids, data.aws_availability_zones.available.zone_ids[i])
   ]
 
-  # Cap to whatever the region actually has (some regions have only 2 usable AZs after exclusions).
-  az_count = min(var.availability_zones_count, length(local.available_azs))
+  # Use every usable AZ the region has. Capped at 8 as a safety limit on the CIDR math below (no
+  # AWS region currently has more than 6 AZs), not a user-facing setting.
+  az_count = min(length(local.available_azs), 8)
   azs      = slice(local.available_azs, 0, local.az_count)
 
   # /20 subnets computed from the VPC /16 CIDR — 16 possible /20s total, public taking indexes
-  # [0, az_count) and private taking [az_count, 2*az_count). Supports up to 8 AZs (az_count<=8);
-  # the variable validation caps it at 6 to leave headroom.
+  # [0, az_count) and private taking [az_count, 2*az_count).
   public_subnets_cidrs  = [for i in range(local.az_count) : cidrsubnet(local.vpc_cidr, 4, i)]
   private_subnets_cidrs = [for i in range(local.az_count) : cidrsubnet(local.vpc_cidr, 4, local.az_count + i)]
 }

@@ -21,16 +21,15 @@ cd auto-mode   # or: cd karpenter
 terraform init
 ```
 
+The VPC automatically spreads across every AZ the region has that supports the EKS control plane
+(subnet CIDRs are computed to fit) - no flag needed.
+
 Flags worth setting on this first apply, since they're easiest to get right upfront:
 
 - **Recommended:** `var.my_cidr` restricts the Grafana ALB Ingress to just your IP, instead of the
   default `0.0.0.0/0` (open to the world). See [Ingress (ALB)](#ingress-alb).
 - **Optional:** `var.enable_efa` installs the EFA device plugin, only needed if you're running
   EFA-capable GPU workloads. See [EFA](#efa).
-- **Optional:** `var.availability_zones_count` (default `3`) controls how many AZs the VPC and
-  cluster spread across - the subnet CIDRs are computed to fit, so this scales cleanly with the
-  region. If the region has fewer usable AZs (some regions have as few as 2 after excluding AZs
-  that don't support the EKS control plane), the region's max is used instead.
 
 ```bash
 export MY_CIDR="$(curl -s https://checkip.amazonaws.com)/32"
@@ -40,11 +39,11 @@ echo $MY_CIDR
 Expected output: `x.x.x.x/32`
 
 ```bash
-terraform apply -var 'region=us-west-2' -var "my_cidr=${MY_CIDR}" -var 'enable_efa=true' -var 'availability_zones_count=4'
+terraform apply -var 'region=us-west-2' -var "my_cidr=${MY_CIDR}" -var 'enable_efa=true'
 ```
 
-Drop any of `-var 'enable_efa=true'`, `-var 'region=...'`, or `-var 'availability_zones_count=...'`
-you don't need - `region` defaults to `us-east-2` and `availability_zones_count` to `3`.
+Drop any of `-var 'enable_efa=true'` or `-var 'region=...'` you don't need - `region` defaults to
+`us-east-2`.
 
 When it finishes, configure `kubectl` (the same command regardless of variant, since the cluster
 name is fixed - match `--region` to whatever you passed to `-var 'region=...'` above, or

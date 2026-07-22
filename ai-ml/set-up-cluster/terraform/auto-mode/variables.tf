@@ -17,17 +17,6 @@ variable "kubernetes_version" {
   default     = "1.36"
 }
 
-variable "availability_zones_count" {
-  description = "Number of AZs to spread the VPC/cluster across. If the region has fewer usable AZs than this (after excluding AZs that don't support the EKS control plane), the region's max is used instead."
-  type        = number
-  default     = 3
-
-  validation {
-    condition     = var.availability_zones_count >= 2 && var.availability_zones_count <= 6
-    error_message = "availability_zones_count must be between 2 and 6."
-  }
-}
-
 variable "allowed_cidrs" {
   description = "CIDRs allowed to reach any publicly accessible endpoint this stack creates (EKS API, ALB)."
   type        = list(string)
