@@ -23,23 +23,28 @@ EKS Auto Mode manages the AMI, instance store, and node bootstrap, so the fields
 
 - An existing On-Demand Capacity Reservation or Capacity Block for `p6-b200.48xlarge`.
 
-Look up the reservation and export the values used later when applying the NodeClass and NCCL test:
+Set the region, then look up the reservation and export the values used later when applying the
+NodeClass and NCCL test:
+
+```bash
+export AWS_REGION=ap-south-1
+```
 
 ```bash
 export CAPACITY_RESERVATION_ID=$(aws ec2 describe-capacity-reservations \
-  --region ap-south-1 \
-  --filters "Name=state,Values=active" "Name=instance-type,Values=p6-b200.48xlarge" "Name=availability-zone,Values=ap-south-1c" \
+  --region "$AWS_REGION" \
+  --filters "Name=state,Values=active" "Name=instance-type,Values=p6-b200.48xlarge" \
   --query 'CapacityReservations[0].CapacityReservationId' \
   --output text)
 
 export RESERVED_INSTANCE_COUNT=$(aws ec2 describe-capacity-reservations \
-  --region ap-south-1 \
+  --region "$AWS_REGION" \
   --capacity-reservation-ids "$CAPACITY_RESERVATION_ID" \
   --query 'CapacityReservations[0].TotalInstanceCount' \
   --output text)
 
 export GPUS_PER_INSTANCE=$(aws ec2 describe-instance-types \
-  --region ap-south-1 \
+  --region "$AWS_REGION" \
   --instance-types p6-b200.48xlarge \
   --query 'InstanceTypes[0].GpuInfo.Gpus[0].Count' \
   --output text)
