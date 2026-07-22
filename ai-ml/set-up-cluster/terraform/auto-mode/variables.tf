@@ -14,7 +14,7 @@ variable "cluster_name" {
 variable "kubernetes_version" {
   description = "Kubernetes minor version for the EKS control plane."
   type        = string
-  default     = "1.35"
+  default     = "1.36"
 }
 
 variable "allowed_cidrs" {
