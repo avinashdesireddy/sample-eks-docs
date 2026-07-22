@@ -127,6 +127,7 @@ resource "helm_release" "kube_prometheus_stack" {
       remote_write_url           = "${aws_prometheus_workspace.amp[0].prometheus_endpoint}api/v1/remote_write"
       prometheus_service_account = local.amp_remote_write_service_account
       grafana_service_account    = local.grafana_service_account
+      grafana_cidr               = var.my_cidr
     })
   ]
 

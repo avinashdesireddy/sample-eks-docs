@@ -141,6 +141,34 @@ differs:
 
 Both are always on (no switch) - create an `Ingress` and an ALB is provisioned for you.
 
+### Grafana Ingress
+
+`auto-mode/` also exposes Grafana through its own ALB `Ingress`, restricted by `var.my_cidr`
+(default `0.0.0.0/0` - open to the world). Restrict it to just your own IP:
+
+```bash
+export MY_CIDR="$(curl -s https://checkip.amazonaws.com)/32"
+echo $MY_CIDR
+```
+
+Expected output: `x.x.x.x/32`
+
+```bash
+terraform apply -var "my_cidr=${MY_CIDR}"
+```
+
+Retrieve the ALB hostname. The load balancer is created asynchronously, so allow a minute or two:
+
+```bash
+echo "http://$(kubectl get ingress kube-prometheus-stack-grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+```
+
+Open the hostname in your browser. Log in with username `admin` and the password from the following command:
+
+```bash
+kubectl --namespace monitoring get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+```
+
 ## Clean up
 
 To remove GPU NodePools while keeping the cluster running, drop the strategy by applying back to
