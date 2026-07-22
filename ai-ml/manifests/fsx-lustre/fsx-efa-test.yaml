@@ -1,0 +1,53 @@
+# FSx for Lustre EFA-path test for the self-managed Karpenter cluster.
+#
+# Runs a GPU pod on the gpu-static-fsx NodePool (whose nodes installed the EFA-enabled Lustre
+# client via userData) that mounts the static claim provisioned by terraform (fsx-lustre-claim,
+# namespace default) and benchmarks throughput with fio. The pod requests an EFA interface so it
+# lands on an EFA-capable node.
+#
+# NOTE: The pod's CSI-mounted volume goes over TCP even here (the CSI driver mounts over @tcp).
+# The EFA (RDMA) transport is exercised by the *node-level* mount using the client installed via
+# userData - see the README's "Verify EFA is carrying the traffic" section (SSM + lctl/lnetctl),
+# which is where @efa peers are observable.
+#
+#   kubectl apply -f fsx-efa-test.yaml
+#   kubectl exec -it fsx-efa-test -- df -hT /data
+#   kubectl exec -it fsx-efa-test -- bash   # then run fio (see README)
+#   kubectl delete -f fsx-efa-test.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fsx-efa-test
+  namespace: default
+spec:
+  nodeSelector:
+    karpenter.sh/nodepool: gpu-static
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: benchmark
+      image: public.ecr.aws/amazonlinux/amazonlinux:2023
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -e
+          echo "=== FSx for Lustre mount check ==="
+          df -hT /data
+          echo "(expect a 'lustre' type; the CSI pod mount is over @tcp)"
+          dnf install -y -q fio
+          echo "fio installed. Exec in and run the benchmarks from the README."
+          sleep infinity
+      resources:
+        requests:
+          vpc.amazonaws.com/efa: 1
+        limits:
+          vpc.amazonaws.com/efa: 1
+      volumeMounts:
+        - name: fsx
+          mountPath: /data
+  volumes:
+    - name: fsx
+      persistentVolumeClaim:
+        claimName: fsx-lustre-claim

@@ -6,27 +6,31 @@ variable "enable_fsx" {
 
 variable "storage_capacity" {
   description = <<-EOT
-    FSx for Lustre storage capacity in GiB (multiple of 2400 for PERSISTENT_2 SSD). The minimum
-    for an EFA-enabled PERSISTENT_2 file system is 38400 GiB. FSx creates 1 OST (parallel I/O
-    target) per 2400 GiB, so capacity also sets the throughput ceiling.
+    FSx for Lustre storage capacity in GiB (multiple of 2400 for PERSISTENT_2 SSD). FSx creates 1
+    OST (parallel I/O target) per 2400 GiB, so capacity also sets the throughput ceiling.
+
+    The minimum for an EFA-enabled PERSISTENT_2 file system depends on per_unit_storage_throughput:
+    it is 4800 GiB at the 1000 MB/s/TiB tier and rises as the tier drops (38400 GiB at 125). Match
+    the capacity to the tier or CreateFileSystem is rejected.
   EOT
   type        = number
-  default     = 38400
+  default     = 4800
 
   validation {
-    condition     = var.storage_capacity % 2400 == 0 && var.storage_capacity >= 38400
-    error_message = "storage_capacity must be a multiple of 2400 GiB and at least 38400 GiB for an EFA-enabled PERSISTENT_2 file system."
+    condition     = var.storage_capacity % 2400 == 0 && var.storage_capacity >= 2400
+    error_message = "storage_capacity must be a multiple of 2400 GiB (PERSISTENT_2 SSD)."
   }
 }
 
 variable "per_unit_storage_throughput" {
   description = <<-EOT
     Per-unit storage throughput in MB/s/TiB for PERSISTENT_2 (125, 250, 500, or 1000). The top
-    tier (1000) is the most capacity-constrained SKU per AZ; if creation fails with an insufficient
-    capacity error, drop to 500/250/125 or retry later - lowering storage_capacity does not help.
+    tier (1000) allows the smallest EFA-enabled file system (4800 GiB minimum), while lower tiers
+    require far more capacity (up to 38400 GiB at 125). If creation fails with an insufficient
+    capacity error, that is a per-AZ signal for the tier - try another AZ or retry later.
   EOT
   type        = number
-  default     = 125
+  default     = 1000
 
   validation {
     condition     = contains([125, 250, 500, 1000], var.per_unit_storage_throughput)
