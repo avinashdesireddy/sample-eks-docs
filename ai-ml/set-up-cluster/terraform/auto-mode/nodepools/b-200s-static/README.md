@@ -89,7 +89,7 @@ envsubst < nodeclass-gpu-static.yaml | kubectl apply -f -
 envsubst < nodepool-gpu-static.yaml | kubectl apply -f -
 ```
 
-> **Access entry:** this custom `NodeClass` reuses the cluster's node IAM role (`node_iam_role_name`), for which EKS already creates an EC2 access entry with the `AmazonEKSAutoNodePolicy`. If you point the NodeClass at a *different* role, create the access entry first - see [Create node class access entry][node-class-access].
+> **Access entry:** this custom `NodeClass` reuses the cluster's node IAM role (`node_iam_role_name`), for which EKS already creates an EC2 access entry with the `AmazonEKSAutoNodePolicy`. If you point the NodeClass at a _different_ role, create the access entry first - see [Create node class access entry][node-class-access].
 
 ## Verify
 
@@ -163,10 +163,15 @@ mpijobs.kubeflow.org
 
 ```bash
 envsubst < mpijob-nccl.yaml | cat   # preview
+```
+
+```bash
 envsubst < mpijob-nccl.yaml | kubectl apply -f -
 ```
 
-Follow the launcher logs:
+The launcher pod runs on CPU general-purpose instance and the container image will download slower than on GPU instance with SOCI enabled.
+
+Once the launcher pod in Running, follow the launcher logs:
 
 ```bash
 kubectl logs -f -l training.kubeflow.org/job-role=launcher
