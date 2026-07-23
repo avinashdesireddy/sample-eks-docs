@@ -1,0 +1,29 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: gpu-static-fsx
+spec:
+  replicas: ${RESERVED_INSTANCE_COUNT}
+  template:
+    metadata:
+      labels:
+        guide: ai-eks-docs
+        amiFamily: al2023
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: gpu-static-fsx
+      taints:
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["reserved"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["p6-b200.48xlarge"]
+        - key: karpenter.k8s.aws/capacity-reservation-type
+          operator: In
+          values: ["capacity-block"]

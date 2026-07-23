@@ -1,0 +1,131 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: gpu-static-fsx
+  labels:
+    guide: ai-eks-docs
+spec:
+  role: ${KARPENTER_NODE_ROLE}
+  amiSelectorTerms:
+    - alias: al2023@latest
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: ${CLUSTER_NAME}
+  capacityReservationSelectorTerms:
+    - id: ${CAPACITY_RESERVATION_ID}
+  instanceStorePolicy: RAID0
+  # Larger root EBS than the AL2023 default (~20 GiB): the GDS build in userData unpacks the full
+  # kernel source tree and compiles nvidia-fs on /, which overflows the default volume. The base
+  # gpu-static pool has no such build and doesn't need this. (RAID0 above covers the instance-store
+  # NVMe for containerd/kubelet only; /, /tmp, and /usr/src stay on this root volume.)
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  # Static EFA config for p6-b200.48xlarge: 1 standard ENI + 8 efa-only interfaces across the 8
+  # network cards. Same layout as the gpu-static NodeClass; this variant differs only in userData,
+  # which installs the EFA-enabled Lustre client so the node can mount FSx over the EFA (RDMA)
+  # transport instead of TCP.
+  networkInterfaces:
+    - networkCardIndex: 0
+      deviceIndex: 0
+      interfaceType: interface
+    - networkCardIndex: 0
+      deviceIndex: 1
+      interfaceType: efa-only
+    - networkCardIndex: 1
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 2
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 3
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 4
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 5
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 6
+      deviceIndex: 0
+      interfaceType: efa-only
+    - networkCardIndex: 7
+      deviceIndex: 0
+      interfaceType: efa-only
+  # MIME-multipart userData: an EKS NodeConfig doc (managed-node bootstrap settings, same as the
+  # base gpu-static pool) plus a shell script that installs the FSx Lustre + EFA client and the
+  # optional NVIDIA GDS (GPUDirect Storage) driver. The client install adds ~5-10 min to first
+  # boot (dnf installs + a kernel-module build for GDS). It is harmless when no FSx is mounted.
+  # Refs:
+  #   https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html
+  userData: |
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      featureGates:
+        FastImagePull: true
+
+    --BOUNDARY
+    Content-Type: text/x-shellscript; charset="us-ascii"
+
+    #!/bin/bash
+    set -ex
+
+    # 1. Install the Lustre client and EFA driver.
+    #    https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html#install-required-drivers
+    echo "Installing Lustre client and git"
+    dnf -y install lustre-client git
+
+    cd /tmp
+    curl -LO https://docs.aws.amazon.com/fsx/latest/LustreGuide/samples/install-fsx-lustre-client.zip
+    unzip install-fsx-lustre-client.zip
+    cd install-fsx-lustre-client
+    ./bin/install-fsx-lustre-client.sh --install-lustre --install-efa
+
+    # 2. Install the NVIDIA GDS (GPUDirect Storage) driver so GPUs can read from Lustre directly.
+    #    Optional; allowed to fail (|| ...) so it can't abort the required EFA config in step 3.
+    # v2.29.4+ detects the kernel 6.18 blk_map_iter change; older tags (v2.28.2) fail to build on it.
+    export GDS_NVIDIA_FS_VERSION="v2.29.4"
+    export NVFS_MAX_PEER_DEVS=128
+    export NVFS_MAX_PCI_DEPTH=16
+    echo "Installing NVIDIA GDS driver: gds-nvidia-fs-${GDS_NVIDIA_FS_VERSION}"
+    (
+      set -e
+      if [ ! -f /opt/gds-nvidia-fs/nvidia-fs.ko ]; then
+        rm -rf /opt/gds-nvidia-fs
+        git clone --branch "$GDS_NVIDIA_FS_VERSION" https://github.com/NVIDIA/gds-nvidia-fs.git /opt/gds-nvidia-fs
+        cd /opt/gds-nvidia-fs/src
+        make module
+        cp -p nvidia-fs.ko /lib/modules/$(uname -r)/extra/nvidia-fs.ko
+      fi
+      echo "Loading nvidia-fs module"
+      depmod $(uname -r)
+      modprobe -v nvidia_fs
+    ) || echo "WARNING: GDS (nvidia-fs) install failed; continuing without GPUDirect Storage. Lustre/EFA is unaffected."
+
+    # 3. Configure EFA for the Lustre client (optimized for GDS).
+    #    https://docs.aws.amazon.com/fsx/latest/LustreGuide/configure-efa-clients.html#install-efa-on-client
+    echo "Configuring EFA on the FSx for Lustre client"
+    cd /tmp
+    curl -LO https://docs.aws.amazon.com/fsx/latest/LustreGuide/samples/configure-efa-fsx-lustre-client.zip
+    unzip configure-efa-fsx-lustre-client.zip
+    cd /tmp/configure-efa-fsx-lustre-client
+    ./setup.sh --optimized-for-gds
+
+    echo "EFA on FSx for Lustre client setup completed successfully."
+
+    --BOUNDARY--

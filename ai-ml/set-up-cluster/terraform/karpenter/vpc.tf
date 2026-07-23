@@ -76,8 +76,8 @@ resource "aws_security_group" "shared" {
   vpc_id      = module.vpc.vpc_id
 
   tags = {
-    Name                                           = "${local.name}-shared"
-    "karpenter.sh/discovery"                       = local.name
+    Name                                  = "${local.name}-shared"
+    "karpenter.sh/discovery"              = local.name
     "kubernetes.io/cluster/${local.name}" = "owned"
   }
 }
@@ -97,12 +97,15 @@ resource "aws_vpc_security_group_egress_rule" "shared_all" {
 }
 
 # EFA requires the security group to explicitly allow all traffic to/from itself (self-referencing
-# both directions), not just a same-VPC or 0.0.0.0/0 egress rule. Gated by var.enable_efa.
+# both directions), not just a same-VPC or 0.0.0.0/0 egress rule. Required by EFA network
+# interfaces AND by EFA-enabled FSx for Lustre (fsx-lustre.tf sets efa_enabled = true), so gate on
+# either flag - FSx creation fails with "Insufficient security group permissions to create an
+# EFA-enabled file system" without it.
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html#efa-start-security
 resource "aws_vpc_security_group_egress_rule" "shared_self" {
-  count = var.enable_efa ? 1 : 0
+  count = var.enable_efa || var.enable_fsx ? 1 : 0
 
-  description                  = "Self-egress, all protocols (required for EFA)"
+  description                  = "Self-egress, all protocols (required for EFA and EFA-enabled FSx)"
   security_group_id            = aws_security_group.shared.id
   referenced_security_group_id = aws_security_group.shared.id
   ip_protocol                  = "-1"

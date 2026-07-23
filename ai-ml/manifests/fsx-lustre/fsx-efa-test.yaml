@@ -20,8 +20,6 @@ metadata:
   name: fsx-efa-test
   namespace: default
 spec:
-  nodeSelector:
-    karpenter.sh/nodepool: gpu-static
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists
