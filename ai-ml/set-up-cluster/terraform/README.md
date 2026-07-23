@@ -9,7 +9,7 @@ Each variant builds the same thing - a VPC, an EKS cluster, and the monitoring s
 
 Pick one and `cd` into it; every command below runs from that directory.
 
-## 1. Deploy the cluster
+## Deploy the cluster
 
 ```bash
 cd auto-mode   # or: cd karpenter
@@ -19,7 +19,7 @@ terraform apply
 
 This gives you a running cluster with the monitoring stack and ingress. You can customize the defaults by overriding them using `-var <property=value>`.
 
-## 2. Connect `kubectl`
+## Access EKS Cluster
 
 Verify the cluster is up. The stack emits a ready-to-run `update-kubeconfig` command with the values provided during deployment.
 
@@ -73,7 +73,7 @@ Notes:
 - An ODCR **bills as soon as it is created** and keeps billing until destroyed, whether or not nodes are running on it.
 - The reservation is a single block in **one AZ**. EC2 reserves all of `instance_count` in that AZ or fails with `InsufficientInstanceCapacity` - there is no automatic AZ fallback. If creation fails, set `reservation.az` to another AZ and re-apply.
 
-## EFA
+## Elastic Fabric Adapter(EFA)
 
 [Elastic Fabric Adapter](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa.html) gives EFA-capable instances (`p*` family, `g*.8xlarge`/`.16xlarge` and larger) a high-bandwidth RDMA path for multi-node training/inference and for FSx for Lustre. `var.enable_efa` (default `false`) installs the EFA device plugin and the self-referencing security-group rule EFA requires. On `auto-mode/` it's the only way to get the plugin, since Auto Mode doesn't bundle it.
 
