@@ -91,7 +91,7 @@ resource "aws_fsx_lustre_file_system" "this" {
     # on every refresh and would otherwise force a replacement of the file system on the next apply.
     # security_group_ids is create-only anyway (it cannot be changed in place), so ignoring drift on
     # it is safe and prevents an accidental destroy - especially after importing a file system that
-    # was created out-of-band (e.g. by manifests/fsx-lustre/find-fsx-capacity.sh).
+    # was created out-of-band.
     ignore_changes = [security_group_ids]
   }
 }

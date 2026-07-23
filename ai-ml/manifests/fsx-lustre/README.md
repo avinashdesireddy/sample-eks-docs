@@ -1,19 +1,19 @@
-# FSx for Lustre on EKS Auto Mode
+# FSx for Lustre on EKS
 
-Provision and test a high-throughput, shared [FSx for Lustre](https://docs.aws.amazon.com/fsx/latest/LustreGuide/what-is.html) file system for GPU workloads on the **EKS Auto Mode** cluster (`../../set-up-cluster/terraform/auto-mode/`). The file system, the FSx CSI driver, and a static `PersistentVolume`/`PersistentVolumeClaim` are provisioned by Terraform behind `enable_fsx`; this directory holds the end-to-end mount + throughput test.
+Provision and test a high-throughput, shared [FSx for Lustre](https://docs.aws.amazon.com/fsx/latest/LustreGuide/what-is.html) file system for GPU workloads. This applies to **both** cluster variants - EKS Auto Mode (`../../set-up-cluster/terraform/auto-mode/`) and self-managed Karpenter (`../../set-up-cluster/terraform/karpenter/`). The file system, the FSx CSI driver, and a static `PersistentVolume`/`PersistentVolumeClaim` are provisioned by Terraform behind `enable_fsx`; this directory holds the end-to-end mount + throughput test that works on either.
 
 Lustre gives the cluster a POSIX, `ReadWriteMany` filesystem that many GPU pods mount at once - the natural home for training datasets, checkpoints, and shared scratch. It is an optional accelerator: the inference path in [`../inference/`](../inference/) runs off the S3 model bucket and does not need Lustre.
 
-## EFA acceleration: Auto Mode vs. Karpenter
+## Transport: TCP everywhere, EFA on Karpenter
 
 FSx for Lustre can serve clients over two transports:
 
-- **TCP** - the standard path. The FSx CSI driver mounts the filesystem into pods over TCP. No node configuration required.
-- **EFA (RDMA)** - higher bandwidth / lower latency, but the node must run the EFA-enabled Lustre client, installed by a `userData` bootstrap script (`install-fsx-lustre-client.sh --install-lustre --install-efa`).
+- **TCP** - the standard path. The FSx CSI driver mounts the filesystem into pods over TCP. No node configuration required, and it's what **both variants** use out of the box. The provisioning and test steps on this page exercise this path.
+- **EFA (RDMA)** - higher bandwidth / lower latency, but the node must run the EFA-enabled Lustre client, installed by a `userData` bootstrap script. EKS Auto Mode manages node bootstrap and does not support `userData`, so the EFA-accelerated client is only available on the self-managed **Karpenter** variant, whose `EC2NodeClass` can carry that script.
 
-**EKS Auto Mode manages node bootstrap and does not support `userData`**, so Auto Mode nodes mount Lustre **over TCP via the CSI driver** - which is exactly what the Terraform here provisions and what this test exercises. The node-level EFA-accelerated client is only available on the self-managed **Karpenter** variant, where the `EC2NodeClass` can carry the bootstrap script. `EfaEnabled` is still set on the filesystem (required for PERSISTENT_2 with automatic metadata), but Auto Mode clients will not use the EFA transport.
+`EfaEnabled` is set on the filesystem regardless (it's required for PERSISTENT_2 with automatic metadata, and is harmless for the TCP path).
 
-> If you need EFA-accelerated Lustre, use the Karpenter variant (`../../set-up-cluster/terraform/karpenter/`) whose `EC2NodeClass` supports the `userData` client install.
+> For the EFA (RDMA) path - the userData client install plus node-level verification that traffic actually rides EFA - see the Karpenter nodepool guide: [`../../set-up-cluster/terraform/karpenter/nodepools/b-200s-static-fsx/README.md`](../../set-up-cluster/terraform/karpenter/nodepools/b-200s-static-fsx/README.md).
 
 ## How Lustre throughput works
 
@@ -23,23 +23,27 @@ A Lustre filesystem has three server-side components:
 - **OSS** (Object Storage Server) - serves file data.
 - **OST** (Object Storage Target) - the disk volume attached to an OSS. Files are **striped** across OSTs, so more OSTs = more parallel I/O paths = more throughput.
 
-On FSx PERSISTENT_2, FSx creates **1 OST per 2400 GiB** of capacity, and each OST does roughly 4-5 GiB/s. So **capacity determines the throughput ceiling**, and `per_unit_storage_throughput` (125/250/500/1000 MB/s/TiB) sets the per-TiB baseline. Aggregate baseline = `per_unit_storage_throughput x (storage_capacity / 1024)` MB/s. Example: 125 MB/s/TiB over 38.4 TiB (the EFA minimum) ≈ 4.8 GB/s baseline across 16 OSTs.
+On FSx PERSISTENT_2, FSx creates **1 OST per 2400 GiB** of capacity, and each OST does roughly 4-5 GiB/s. So **capacity determines the throughput ceiling**, and `per_unit_storage_throughput` (125/250/500/1000 MB/s/TiB) sets the per-TiB baseline. Aggregate baseline = `per_unit_storage_throughput x (storage_capacity / 1024)` MB/s. Example: 1000 MB/s/TiB over 4.8 TiB (the default) ≈ 4.7 GB/s baseline across 2 OSTs.
 
 ## Prerequisites
 
-- The Auto Mode cluster deployed (see [`../../set-up-cluster/terraform/README.md`](../../set-up-cluster/terraform/README.md)) and `kubectl` configured:
+- Either cluster variant deployed (see [`../../set-up-cluster/terraform/README.md`](../../set-up-cluster/terraform/README.md)) and `kubectl` configured:
 
   ```bash
   aws eks update-kubeconfig --region us-east-2 --name ai-eks-docs --alias ai-eks-docs
   ```
 
-## Provision the file system
-
-From the Auto Mode Terraform directory. Lustre lives in a single subnet, which should be in the same AZ as the GPU nodes that will mount it. Pick a private subnet (tagged `karpenter.sh/discovery=<cluster>`) in that AZ:
+The rest of this page runs from your chosen variant's Terraform directory. Set it once:
 
 ```bash
-cd ../../set-up-cluster/terraform/auto-mode
+export TF_DIR=../../set-up-cluster/terraform/auto-mode   # or .../karpenter
+```
 
+## Provision the file system
+
+Lustre lives in a single subnet, which should be in the same AZ as the GPU nodes that will mount it. Pick a private subnet (tagged `karpenter.sh/discovery=<cluster>`) in that AZ:
+
+```bash
 # A private subnet in the AZ where your GPU capacity lives (adjust the AZ):
 export FSX_SUBNET_ID=$(aws ec2 describe-subnets \
   --filters "Name=tag:karpenter.sh/discovery,Values=ai-eks-docs" "Name=availability-zone,Values=us-east-2a" \
@@ -47,78 +51,40 @@ export FSX_SUBNET_ID=$(aws ec2 describe-subnets \
 echo "FSx subnet: $FSX_SUBNET_ID"
 ```
 
-Apply with `enable_fsx=true`. The default is the EFA-enabled minimum (38400 GiB) at the lowest throughput tier (125 MB/s/TiB), which is the most likely to have capacity:
+Apply with `enable_fsx=true`. The default is the smallest EFA-enabled file system (4800 GiB) at the top throughput tier (1000 MB/s/TiB):
 
 ```bash
-terraform apply \
+terraform -chdir="$TF_DIR" apply \
   -var 'enable_fsx=true' \
   -var "subnet_id=$FSX_SUBNET_ID"
 ```
 
-To push throughput, raise the tier and/or capacity (more OSTs):
+To size up, raise the capacity (more OSTs) and/or drop the tier - each lower `per_unit_storage_throughput` requires more capacity:
 
 ```bash
-terraform apply \
+terraform -chdir="$TF_DIR" apply \
   -var 'enable_fsx=true' \
   -var "subnet_id=$FSX_SUBNET_ID" \
-  -var 'storage_capacity=76800' \
+  -var 'storage_capacity=9600' \
   -var 'per_unit_storage_throughput=1000'
 ```
 
 The file system takes ~10-30 minutes to reach `AVAILABLE`. Terraform creates the CSI driver add-on and the static PV/PVC as part of the same apply.
 
-> **`PERSISTENT_2` capacity errors.** *"Your filesystem failed to create due to insufficient capacity"* is a real AWS-side, **per-AZ** signal for the throughput tier you requested - lowering `storage_capacity` does not help. The top tier (`per_unit_storage_throughput=1000`) is the most constrained. Retry with a lower tier (`500`/`250`/`125`), pick a subnet in another AZ (trading GPU-node locality), or wait and retry. If the file system reaches `FAILED`, delete it (`aws fsx delete-file-system --file-system-id <id>`) - a `FAILED` file system does not bill but is left behind - and if the failed apply recorded it in state, run `terraform state rm 'aws_fsx_lustre_file_system.this[0]'` before retrying.
+> **`PERSISTENT_2` capacity errors.** *"Your filesystem failed to create due to insufficient capacity"* is a real AWS-side, **per-AZ** signal for the throughput tier you requested - lowering `storage_capacity` does not help. The top tier (`per_unit_storage_throughput=1000`) is the most constrained. Retry with a lower tier (`500`/`250`/`125`) - raising `storage_capacity` to that tier's minimum (up to 38400 GiB at 125) - pick a subnet in another AZ (trading GPU-node locality), or wait and retry. If the file system reaches `FAILED`, delete it (`aws fsx delete-file-system --file-system-id <id>`) - a `FAILED` file system does not bill but is left behind - and if the failed apply recorded it in state, run `terraform state rm 'aws_fsx_lustre_file_system.this[0]'` before retrying.
 
-### Find capacity across AZs
-
-There is **no AWS API to pre-check FSx physical capacity** - the only way to know is to attempt `CreateFileSystem` and wait ~5-10 min for `AVAILABLE` vs `FAILED`. And FSx for Lustre uses a **single subnet**, so there is no native multi-AZ and a single Terraform resource cannot fall back on its own. `find-fsx-capacity.sh` does probe-and-fallback: it tries each candidate subnet, waits for the result, deletes the file system if it `FAILED`, and stops on the first success - printing the winning subnet and file system id.
+Verify the PVC bound (the static PV binds it by `volumeName`):
 
 ```bash
-SG=$(aws ec2 describe-security-groups \
-  --filters "Name=tag:karpenter.sh/discovery,Values=ai-eks-docs" \
-  --query 'SecurityGroups[0].GroupId' --output text)
-
-# Probe one discovery-tagged subnet per AZ (defaults: 38400 GiB @ 125 MB/s/TiB).
-# Run from the Terraform dir (terraform/auto-mode); the script lives in set-up-cluster/scripts/:
-../../scripts/find-fsx-capacity.sh \
-  --region us-east-2 --cluster ai-eks-docs --security-group-id "$SG"
-```
-
-On success it prints:
-
-```
-FSX_SUBNET_ID=subnet-...
-FSX_AZ=us-east-2b
-FSX_FILE_SYSTEM_ID=fs-...
-FSX_DNS_NAME=fs-....fsx.us-east-2.amazonaws.com
-FSX_MOUNT_NAME=abcd1234
-```
-
-The winning file system is EFA-enabled and identical to what `fsx-lustre.tf` builds, so **adopt it into Terraform** rather than letting Terraform create a second one (and re-gamble on capacity). Import it, then apply with the same vars so Terraform reconciles it and creates the CSI add-on + PV/PVC around it:
-
-```bash
-cd ../../set-up-cluster/terraform/auto-mode
-terraform import \
-  -var 'enable_fsx=true' -var "subnet_id=<FSX_SUBNET_ID from above>" \
-  'aws_fsx_lustre_file_system.this[0]' <FSX_FILE_SYSTEM_ID from above>
-
-terraform apply -var 'enable_fsx=true' -var "subnet_id=<FSX_SUBNET_ID>"
-```
-
-> The import must use the **same `storage_capacity` / `per_unit_storage_throughput`** you passed to the script (defaults match `fsx-lustre.tf`), or Terraform will plan a replacement.
-
-Verify:
-
-```bash
-terraform output fsx_file_system_id
+terraform -chdir="$TF_DIR" output fsx_file_system_id
 kubectl get pvc fsx-lustre-claim -n default
 ```
 
-Expected output:
+Expected output (capacity reflects your `storage_capacity`; `4800Gi` by default):
 
 ```
 NAME               STATUS   VOLUME          CAPACITY   ACCESS MODES
-fsx-lustre-claim   Bound    fsx-lustre-pv   38400Gi    RWX
+fsx-lustre-claim   Bound    fsx-lustre-pv   4800Gi     RWX
 ```
 
 Confirm the CSI driver registered:
@@ -144,7 +110,7 @@ kubectl logs -f job/fsx-lustre-reader    # cross-node read-back
 The writer's mount line should show a `lustre` type over `@tcp`, e.g.:
 
 ```
-100.64.59.94@tcp:/iatcdb4v   38T  7.5M   38T   1% /data
+100.64.59.94@tcp:/iatcdb4v   4.5T  7.5M   4.5T   1% /data
 ```
 
 and a quick single-job `fio` write should report roughly the per-OST rate (~1 GB/s):
@@ -178,7 +144,7 @@ To use Lustre from a real workload, mount `fsx-lustre-claim` into the pod (`Read
 **PVC stuck `Pending`.** The PV binds by `volumeName`; confirm the filesystem is `AVAILABLE` and the CSI controller is running:
 
 ```bash
-terraform -chdir=../../set-up-cluster/terraform/auto-mode output fsx_file_system_id
+terraform -chdir="$TF_DIR" output fsx_file_system_id
 aws fsx describe-file-systems --query 'FileSystems[0].Lifecycle' --output text
 kubectl get pods -n kube-system -l app=fsx-csi-controller
 kubectl describe pvc fsx-lustre-claim -n default
@@ -217,6 +183,5 @@ kubectl delete -f fsx-lustre-test.yaml
 The PV uses a `Retain` reclaim policy, so the filesystem is not deleted by removing Kubernetes objects. To destroy the filesystem, CSI driver, and PV/PVC, re-apply with `enable_fsx=false` (keeping the other vars) or `terraform destroy`:
 
 ```bash
-cd ../../set-up-cluster/terraform/auto-mode
-terraform apply -var 'enable_fsx=false' -var "subnet_id=$FSX_SUBNET_ID"
+terraform -chdir="$TF_DIR" apply -var 'enable_fsx=false' -var "subnet_id=$FSX_SUBNET_ID"
 ```

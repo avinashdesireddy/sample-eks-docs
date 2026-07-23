@@ -87,6 +87,16 @@ It's an independent flag - combine it with any GPU strategy from the table above
 
 Enabling EFA also installs the [MPI Operator](https://github.com/kubeflow/mpi-operator) for distributed `MPIJob` resources (multi-node NCCL/EFA tests).
 
+## Shared storage (FSx for Lustre)
+
+For a high-throughput, `ReadWriteMany` filesystem that many GPU pods mount at once — training datasets, checkpoints, shared scratch — enable [FSx for Lustre](https://docs.aws.amazon.com/fsx/latest/LustreGuide/what-is.html). Terraform provisions the file system, the CSI driver, and a static PV/PVC behind `enable_fsx`; **both variants** mount it over TCP.
+
+```bash
+terraform apply -var 'enable_fsx=true' -var "subnet_id=<private subnet in your GPU AZ>"
+```
+
+See [`../../manifests/fsx-lustre/README.md`](../../manifests/fsx-lustre/README.md) for the full provision-and-test walkthrough (works on either variant). On Karpenter you can additionally mount Lustre over the **EFA (RDMA)** transport — see the [`b-200s-static-fsx`](karpenter/nodepools/b-200s-static-fsx/README.md) nodepool guide.
+
 ## Ingress (ALB)
 
 Both variants ship a default `alb` `IngressClass`, so any `Ingress` with no `ingressClassName` gets an internet-facing Application Load Balancer automatically - always on, no flag. They differ only in plumbing: `auto-mode/` uses Auto Mode's built-in ALB controller (just an `IngressClass` + `IngressClassParams`), while `karpenter/` installs the full [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/) (IAM role/policy, pod identity, Helm release) since it has none built in.
