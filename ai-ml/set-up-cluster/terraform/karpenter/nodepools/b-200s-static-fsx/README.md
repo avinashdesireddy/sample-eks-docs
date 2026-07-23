@@ -31,10 +31,6 @@ export CAPACITY_RESERVATION_ID=$(aws ec2 describe-capacity-reservations \
   --filters "Name=state,Values=active" "Name=instance-type,Values=$INSTANCE_TYPE" \
   --query 'CapacityReservations[0].CapacityReservationId' --output text)
 
-# How many instances it reserves (sizes the NodePool):
-export RESERVED_INSTANCE_COUNT=$(aws ec2 describe-capacity-reservations \
-  --region "$AWS_REGION" --capacity-reservation-ids "$CAPACITY_RESERVATION_ID" \
-  --query 'CapacityReservations[0].TotalInstanceCount' --output text)
 
 # Which AZ it's in (FSx and the nodes must share it):
 export FSX_AZ=$(aws ec2 describe-capacity-reservations \
