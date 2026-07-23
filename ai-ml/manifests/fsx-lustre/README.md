@@ -46,10 +46,9 @@ Lustre lives in a single subnet, which should be in the same AZ as the GPU nodes
 ```bash
 # A private subnet in the AZ where your GPU capacity lives (adjust the AZ):
 export FSX_SUBNET_ID=$(aws ec2 describe-subnets \
-  --filters "Name=tag:karpenter.sh/discovery,Values=ai-eks-docs" "Name=availability-zone,Values=us-east-2a" \
-  --query 'Subnets[0].SubnetId' --output text)
+ --filters "Name=tag:karpenter.sh/discovery,Values=ai-eks-docs" "Name=availability-zone,Values=us-east-2a" \
+ --query 'Subnets[0].SubnetId' --output text)
 echo "FSx subnet: $FSX_SUBNET_ID"
-```
 
 Apply with `enable_fsx=true`. The default is the smallest EFA-enabled file system (4800 GiB) at the top throughput tier (1000 MB/s/TiB):
 
