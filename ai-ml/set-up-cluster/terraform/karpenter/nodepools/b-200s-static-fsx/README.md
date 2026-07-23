@@ -41,7 +41,7 @@ export FSX_AZ=$(aws ec2 describe-capacity-reservations \
   --region "$AWS_REGION" --capacity-reservation-ids "$CAPACITY_RESERVATION_ID" \
   --query 'CapacityReservations[0].AvailabilityZone' --output text)
 
-echo "Reservation: $CAPACITY_RESERVATION_ID  Instances: $RESERVED_INSTANCE_COUNT  AZ: $FSX_AZ"
+echo "Reservation: $CAPACITY_RESERVATION_ID AZ: $FSX_AZ"
 ```
 
 > With **more than one** active reservation for `$INSTANCE_TYPE` (e.g. in different AZs), this picks the first. Add additional `--filters` to pin the one you want.
