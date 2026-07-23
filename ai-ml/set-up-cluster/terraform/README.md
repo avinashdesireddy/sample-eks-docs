@@ -39,7 +39,7 @@ Pick a strategy from the table, then follow the linked steps. The first two are 
 | _(none, default)_            | You only want the cluster + monitoring, no GPU capacity or billing | `terraform apply`     | Nothing extra - this is the default                               |
 | `spot-ondemand`              | On-demand GPU inference, no reservation; spot-first with overflow  | `terraform -var`      | [On-demand / spot pool](#on-demand--spot-pool)                    |
 | `reserved-spot-ondemand`     | You want Terraform to create + manage an ODCR for you              | `terraform -var`      | [Reserved capacity](#reserved-capacity)                           |
-| `b-200s-static`              | You already hold reservation / Capacity Block | `kubectl`      | [automode](auto-mode/nodepools/b-200s-static/README.md) [karpenter](karpenter/nodepools/b-200s-static/README.md) |
+| `b-200s-static`              | You already hold reservation / Capacity Block | `kubectl`      | [automode](auto-mode/nodepools/b-200s-static/README.md) / [karpenter](karpenter/nodepools/b-200s-static/README.md) |
 | `b-200s-static-fsx` (karpenter only) | The above, plus an EFA-accelerated FSx for Lustre mount    | `kubectl`      | [karpenter](karpenter/nodepools/b-200s-static-fsx/README.md) |
 
 > Some GPU pools can't be wired into `var.nodepools` - Terraform can't create a Capacity Block for a specific instance type/date - so they're applied manually with `kubectl` against a reservation or Capacity Block you already have.
@@ -115,12 +115,6 @@ kubectl --namespace monitoring get secrets kube-prometheus-stack-grafana -o json
 ```
 
 ## Clean up
-
-To remove GPU NodePools while keeping the cluster running, apply back to the default (no `-var 'nodepools=...'`). If a strategy had a reservation, this also destroys its ODCR; the cluster and monitoring stack stay up:
-
-```bash
-terraform apply
-```
 
 To delete everything this stack created (cluster, VPC, monitoring, any ODCR):
 
