@@ -32,7 +32,7 @@ export CAPACITY_RESERVATION_ID=$(aws ec2 describe-capacity-reservations \
   --query 'CapacityReservations[0].CapacityReservationId' --output text)
 
 
-# Which AZ it's in (FSx and the nodes must share it):
+# Which AZ it is using (FSx and the nodes must share it):
 export FSX_AZ=$(aws ec2 describe-capacity-reservations \
   --region "$AWS_REGION" --capacity-reservation-ids "$CAPACITY_RESERVATION_ID" \
   --query 'CapacityReservations[0].AvailabilityZone' --output text)
@@ -57,7 +57,7 @@ echo "FSx subnet: $FSX_SUBNET_ID"
 Use `terraform` to create the smallest file system by default (4800 GiB):
 
 ```bash
-terraform -chdir=../.. apply -var 'enable_fsx=true' -var "subnet_id=$FSX_SUBNET_ID"
+terraform -chdir=../.. apply -var 'enable_efa=true' -var 'enable_fsx=true' -var "subnet_id=$FSX_SUBNET_ID"
 ```
 
 > To size it up, override `storage_capacity` and `per_unit_storage_throughput` (see their descriptions in [`../../fsx-lustre.tf`](../../fsx-lustre.tf) for the valid values and how they interact). If creation fails with an insufficient-capacity error, that AZ is short on the requested tier — drop to a lower `per_unit_storage_throughput` (`500`/`250`/`125`) and raise `storage_capacity` to that tier's minimum.
@@ -65,7 +65,7 @@ terraform -chdir=../.. apply -var 'enable_fsx=true' -var "subnet_id=$FSX_SUBNET_
 The file system takes ~10-30 min to reach `AVAILABLE`. Terraform also creates the FSx CSI driver add-on and the static PV/PVC. Verify:
 
 ```bash
-terraform output fsx_file_system_id
+terraform -chdir=../.. output fsx_file_system_id
 kubectl get pvc fsx-lustre-claim -n default   # expect STATUS Bound
 ```
 
@@ -76,6 +76,14 @@ The manifests use template vars: `nodeclass-gpu-static-fsx.yaml` needs `${CLUSTE
 ```bash
 export KARPENTER_NODE_ROLE=$(terraform -chdir=../.. output -raw node_iam_role_name)
 echo "Node role: $KARPENTER_NODE_ROLE"
+```
+
+```bash
+export RESERVED_INSTANCE_COUNT=$(aws ec2 describe-capacity-reservations \
+  --region "$AWS_REGION" \
+  --capacity-reservation-ids "$CAPACITY_RESERVATION_ID" \
+  --query 'CapacityReservations[0].TotalInstanceCount' \
+  --output text)
 ```
 
 > **Pass `envsubst` an explicit variable allowlist.** The NodeClass `userData` contains shell variables (`$GDS_NVIDIA_FS_VERSION`, `$(uname -r)`, ...) that a bare `envsubst` would blank out, breaking the boot script (e.g. `git clone --branch ""`). Restricting it to the template vars leaves the shell script intact.
@@ -120,8 +128,9 @@ lsmod | grep -E 'lustre|nvidia_fs'
 
 [`fsx-efa-test.yaml`](../../../../../manifests/fsx-lustre/fsx-efa-test.yaml) runs a GPU pod on `gpu-static-fsx` that mounts `fsx-lustre-claim` and installs `fio`. The **CSI pod mount is over TCP** — the EFA transport is verified at the node level in step 5.
 
+Navigate to `manifests/fsx-luster/` directory
 ```bash
-kubectl apply -f ../../../../../manifests/fsx-lustre/fsx-efa-test.yaml
+kubectl apply -f fsx-efa-test.yaml
 kubectl get pod fsx-efa-test          # expect Running
 kubectl exec fsx-efa-test -- df -hT /data
 ```
@@ -138,7 +147,7 @@ fio --name=seqwrite --rw=write --bs=16M --size=1G --numjobs=1 --directory=/data 
 fio --name=seqwrite --rw=write --bs=16M --size=16G --numjobs=32 --directory=/data --direct=1 --ioengine=libaio --iodepth=64 --group_reporting --status-interval=1
 ```
 
-Capacity sets the OST count (1 OST per 2400 GiB); more OSTs = more parallel throughput. See [`../../../../../manifests/fsx-lustre/README.md`](../../../../../manifests/fsx-lustre/README.md) for how to read the numbers.
+Capacity sets the OST count (1 OST per 2400 GiB); more OSTs = more parallel throughput. See [`manifests/fsx-lustre/README.md`](../../../../../manifests/fsx-lustre/README.md) for how to read the numbers.
 
 ## 5. Verify EFA is carrying the traffic (node-level, SSM)
 
@@ -251,7 +260,6 @@ This adds **~5-10 minutes** to first boot (package installs + a kernel-module bu
 Run from `nodepools/b-200s-static-fsx` (the test pod lives under `manifests/`):
 
 ```bash
-kubectl delete -f ../../../../../manifests/fsx-lustre/fsx-efa-test.yaml
 kubectl delete -f nodepool-gpu-static-fsx.yaml
 kubectl delete -f nodeclass-gpu-static-fsx.yaml
 ```
